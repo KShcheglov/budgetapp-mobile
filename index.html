@@ -106,8 +106,8 @@
   /* Адаптация таблицы бюджета для узких экранов */
   #budgetTable { font-size: 13px; }
   #budgetTable th, #budgetTable td { padding: 4px 2px; }
-  #budgetTable thead { position: sticky; top: 0; background: var(--card-bg); z-index: 10; }
-  #budgetTable thead th { border-bottom: 2px solid var(--border); }
+  .table-wrapper { max-height: calc(100vh - 200px); overflow-y: auto; position: relative; }
+  #budgetTable thead th { position: sticky; top: 0; background: var(--card-bg); z-index: 10; border-bottom: 2px solid var(--border); }
   input, button {
     font-size: 15px;
     padding: 10px;
@@ -177,7 +177,9 @@
     <div class="page" id="page-budget">
       <div class="card">
         <h2 style="margin-top:0; font-size:15px" id="budgetMonthLabel">Бюджет</h2>
-        <table id="budgetTable"></table>
+        <div class="table-wrapper">
+          <table id="budgetTable"></table>
+        </div>
       </div>
     </div>
 
