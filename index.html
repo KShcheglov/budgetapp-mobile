@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Мой Бюджет — телефон</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="theme-color" content="#1f9d63">
+<script>
+  // Ставим тему СРАЗУ, до рендера остального - иначе при загрузке будет
+  // на мгновение видна тема по умолчанию (тёмная), а потом "моргнёт" в
+  // сохранённую. Если пользователь ещё ни разу не переключал вручную -
+  // берём тему самого телефона как стартовое значение (см. applyTheme/
+  // toggleTheme в конце файла - там та же логика хранения, что и в
+  // десктопном приложении, localStorage, а не только жест телефона).
+  (function() {
+    var saved = localStorage.getItem('budgetapp_mobile_theme');
+    var theme = (saved === 'light' || saved === 'dark')
+      ? saved
+      : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<!--
+  Это ОТДЕЛЬНАЯ статическая страница, не часть десктопного pywebview-
+  приложения (там свой frontend/index.html) - открывается на телефоне
+  напрямую из браузера, либо выложенной на бесплатный статический
+  хостинг (GitHub Pages и т.п.), либо как локальный файл.
+
+  PWA (manifest.json + sw.js рядом): при открытии через ХОСТИНГ (не
+  локальный файл - service worker требует https или localhost, из
+  file:// он не регистрируется вообще) браузер предложит "Добавить на
+  главный экран" - иконка, отдельное окно без адресной строки, и
+  кэширование последнего снимка для просмотра БЕЗ связи (см. sw.js).
+  Открытая как локальный файл страница всё равно работает для обычного
+  просмотра - просто без иконки на столе и без офлайн-кэша.
+
+  ТОЛЬКО ЧТЕНИЕ - ничего не редактирует и не пишет обратно. Источник
+  данных - JSON-файл, который десктопное приложение кладёт в локальную
+  Dropbox-папку (кнопка "Синхронизировать для телефона" на странице
+  "Резервные копии", можно включить автоматически при закрытии
+  приложения) - Dropbox сам грузит его в облако, эта страница просто
+  скачивает готовый файл по ссылке "Поделиться" и рисует 3 вкладки.
+  Никакого сервера, никакого VPN - см. docs/PROGRESS.md, раздел
+  "Мобильный просмотр", там же обсуждение вариантов архитектуры и
+  почему выбран именно этот.
+
+  Ссылка на файл в Dropbox хранится в localStorage ЭТОГО телефона (не
+  где-то ещё) - см. предупреждение в самом интерфейсе про то, что
+  ссылка "Поделиться" без пароля равносильна доступу к данным для
+  любого, кто её узнает.
+-->
+<style>
+  /* Тёмная - значения по умолчанию в :root, светлая - оверрайд через
+     [data-theme="light"] (тот же приём, что и в десктопном
+     frontend/index.html - JS переключает атрибут, выбор запоминается в
+     localStorage, чтобы при следующем открытии не сбрасывало обратно на
+     тёмную). Если пользователь ЕЩЁ НИ РАЗУ не переключал вручную -
+     стартовое значение берём из темы самого телефона
+     (prefers-color-scheme) - см. скрипт внизу файла, applyTheme(...). */
+  :root {
+    --bg: #1e2430;
+    --text: #eef1f5;
+    --text-muted: #9fb0c3;
+    --accent: #6fd3a0;
+    --danger: #e08787;
+    --card-bg: #2a3242;
+    --border: #3d4658;
+  }
+  [data-theme="light"] {
+    --bg: #f2f4f8;
+    --text: #1c2333;
+    --text-muted: #5b6b82;
+    --accent: #1f9d63;
+    --danger: #c9403f;
+    --card-bg: #ffffff;
+    --border: #d7dee8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", -apple-system, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 12px 12px 80px;
+  }
+  h1 { color: var(--accent); font-size: 18px; margin: 4px 0 12px; }
+  .updated { color: var(--text-muted); font-size: 12px; margin-bottom: 12px; }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+  th.num, td.num { text-align: right; }
+  .total-row td { font-weight: 600; border-top: 2px solid var(--border); border-bottom: none; }
+  .positive { color: var(--accent); }
+  .negative { color: var(--danger); }
+  .muted { color: var(--text-muted); font-size: 12px; }
+  input, button {
+    font-size: 15px;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    color: var(--text);
+  }
+  input { width: 100%; margin-bottom: 8px; }
+  button { background: var(--accent); color: #10131a; border: none; font-weight: 600; }
+  .tabs {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    display: flex; background: var(--card-bg); border-top: 1px solid var(--border);
+  }
+  .tab-btn {
+    flex: 1; padding: 12px 4px; text-align: center; font-size: 13px;
+    background: none; border: none; color: var(--text-muted); border-radius: 0;
+  }
+  .tab-btn.active { color: var(--accent); font-weight: 600; }
+  .page { display: none; }
+  .page.active { display: block; }
+  .refresh-btn { width: 100%; margin-top: 4px; }
+  .depth-1 { padding-left: 16px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+  <div id="setupScreen" style="display:none">
+    <h1>Мой Бюджет — телефон</h1>
+    <p class="muted">
+      Первый запуск - вставь Dropbox-ссылку "Поделиться" на файл
+      <code>budgetapp_mobile_snapshot.json</code> (создаётся десктопным
+      приложением). Сохранится только на этом телефоне.
+    </p>
+    <p style="color:var(--danger); font-size:13px">
+      Внимание: у кого угодно с этой ссылкой будет доступ к твоим остаткам
+      и долгам без пароля (если не включена защита паролем на стороне
+      Dropbox). Не пересылай её в открытых чатах.
+    </p>
+    <input type="text" id="linkInput" placeholder="https://www.dropbox.com/scl/fi/.../budgetapp_mobile_snapshot.json?...">
+    <button onclick="saveLink()">Сохранить и загрузить</button>
+  </div>
+
+  <div id="mainScreen" style="display:none">
+    <div style="display:flex; justify-content:space-between; align-items:center">
+      <h1 style="margin:4px 0">Мой Бюджет</h1>
+      <button id="themeToggleBtn" onclick="toggleTheme()" style="width:auto; padding:8px 12px; background:var(--card-bg); color:var(--text); font-size:16px">🌙</button>
+    </div>
+    <div class="updated" id="updatedLine"></div>
+    <div id="errorBox"></div>
+
+    <div class="page active" id="page-money">
+      <div class="card">
+        <h2 style="margin-top:0; font-size:15px">Остатки денег</h2>
+        <table id="moneyTable"></table>
+      </div>
+    </div>
+
+    <div class="page" id="page-debts">
+      <div class="card">
+        <h2 style="margin-top:0; font-size:15px">Долги</h2>
+        <table id="debtsTable"></table>
+      </div>
+    </div>
+
+    <div class="page" id="page-budget">
+      <div class="card">
+        <h2 style="margin-top:0; font-size:15px" id="budgetMonthLabel">Бюджет</h2>
+        <table id="budgetTable"></table>
+      </div>
+    </div>
+
+    <button class="refresh-btn" onclick="loadSnapshot()">↻ Обновить</button>
+    <p class="muted" style="text-align:center; margin-top:10px">
+      <span onclick="showSetup()" style="text-decoration:underline">поменять ссылку</span>
+    </p>
+  </div>
+
+  <div class="tabs" id="tabs" style="display:none">
+    <button class="tab-btn active" data-page="money" onclick="showTab('money')">💰 Деньги</button>
+    <button class="tab-btn" data-page="debts" onclick="showTab('debts')">📋 Долги</button>
+    <button class="tab-btn" data-page="budget" onclick="showTab('budget')">📊 Бюджет</button>
+  </div>
+
+<script>
+  const STORAGE_KEY = 'budgetapp_mobile_dropbox_link';
+  const THEME_KEY = 'budgetapp_mobile_theme';
+
+  // Сама тема уже применена раньше (см. inline-скрипт в <head> - там же
+  // объяснение, почему это должно случиться ДО рендера). Тут только
+  // синхронизируем иконку кнопки с уже выставленным атрибутом и даём
+  // способ её переключить - логика идентична десктопному приложению
+  // (frontend/index.html, applyTheme/toggleTheme).
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    const btn = document.getElementById('themeToggleBtn');
+    if (btn) btn.textContent = theme === 'light' ? '☀' : '🌙';
+  }
+  function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    const next = current === 'light' ? 'dark' : 'light';
+    localStorage.setItem(THEME_KEY, next);
+    applyTheme(next);
+  }
+  applyTheme(document.documentElement.getAttribute('data-theme') || 'dark');
+
+  function formatMoney(kopecks) {
+    return (kopecks / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  // Dropbox-ссылка "Поделиться" по умолчанию открывает страницу
+  // ПРЕДПРОСМОТРА (dl=0), а не сырой файл - для fetch() нужен именно
+  // сырой контент (dl=1).
+  function normalizeDropboxUrl(url) {
+    url = url.trim();
+    if (!url) return url;
+    if (url.includes('dl=0')) return url.replace('dl=0', 'dl=1');
+    if (url.includes('dl=1')) return url;
+    return url + (url.includes('?') ? '&' : '?') + 'dl=1';
+  }
+
+  function showSetup() {
+    document.getElementById('setupScreen').style.display = 'block';
+    document.getElementById('mainScreen').style.display = 'none';
+    document.getElementById('tabs').style.display = 'none';
+    document.getElementById('linkInput').value = localStorage.getItem(STORAGE_KEY) || '';
+  }
+
+  function saveLink() {
+    const link = document.getElementById('linkInput').value.trim();
+    if (!link) return;
+    localStorage.setItem(STORAGE_KEY, link);
+    loadSnapshot();
+  }
+
+  function showTab(name) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-' + name).classList.add('active');
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.page === name));
+  }
+
+  async function loadSnapshot() {
+    const link = localStorage.getItem(STORAGE_KEY);
+    if (!link) { showSetup(); return; }
+
+    const errorBox = document.getElementById('errorBox');
+    errorBox.innerHTML = '<p class="muted">Загружаю...</p>';
+
+    let data;
+    try {
+      const resp = await fetch(normalizeDropboxUrl(link), { cache: 'no-store' });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      data = await resp.json();
+    } catch (e) {
+      errorBox.innerHTML = '<p style="color:var(--danger)">Не удалось загрузить: ' + e.message +
+        '. Проверь ссылку (кнопка "поменять ссылку" внизу) и что телефон в сети.</p>';
+      document.getElementById('setupScreen').style.display = 'none';
+      document.getElementById('mainScreen').style.display = 'block';
+      document.getElementById('tabs').style.display = 'flex';
+      return;
+    }
+
+    if (!data.ok) {
+      errorBox.innerHTML = '<p style="color:var(--danger)">Снимок с ошибкой: ' + (data.error || '?') + '</p>';
+      return;
+    }
+    errorBox.innerHTML = '';
+
+    document.getElementById('setupScreen').style.display = 'none';
+    document.getElementById('mainScreen').style.display = 'block';
+    document.getElementById('tabs').style.display = 'flex';
+
+    document.getElementById('updatedLine').textContent =
+      'Обновлено на компьютере: ' + data.generated_at +
+      (navigator.onLine ? '' : ' (офлайн - показаны последние загруженные данные)');
+
+    renderMoney(data);
+    renderDebts(data);
+    renderBudget(data);
+  }
+
+  function renderMoney(data) {
+    const sym = data.display_currency_code || '';
+    let html = '<tr><th>Счёт</th><th class="num">Сумма</th></tr>';
+    data.money.rows.forEach(r => {
+      html += '<tr><td>' + r.account + '</td><td class="num">' +
+        formatMoney(r.amount_kopecks) + ' ' + r.code + '</td></tr>';
+    });
+    html += '<tr class="total-row"><td>Итого (≈ ' + sym + ')</td><td class="num">' +
+      formatMoney(data.money.total_converted_kopecks) + ' ' + sym + '</td></tr>';
+    document.getElementById('moneyTable').innerHTML = html;
+  }
+
+  function renderDebts(data) {
+    const sym = data.display_currency_code || '';
+    if (!data.debts.rows.length) {
+      document.getElementById('debtsTable').innerHTML = '<tr><td class="muted">Долгов нет.</td></tr>';
+      return;
+    }
+    let html = '<tr><th>Счёт</th><th class="num">Сумма</th></tr>';
+    data.debts.rows.forEach(r => {
+      const cls = r.amount_kopecks >= 0 ? 'positive' : 'negative';
+      html += '<tr><td>' + r.account + '</td><td class="num ' + cls + '">' +
+        formatMoney(r.amount_kopecks) + ' ' + r.code + '</td></tr>';
+    });
+    const totalCls = data.debts.total_converted_kopecks >= 0 ? 'positive' : 'negative';
+    html += '<tr class="total-row"><td>Итого нетто (≈ ' + sym + ')</td><td class="num ' + totalCls + '">' +
+      formatMoney(data.debts.total_converted_kopecks) + ' ' + sym + '</td></tr>';
+    document.getElementById('debtsTable').innerHTML = html;
+  }
+
+  function renderBudget(data) {
+    const sym = data.display_currency_code || '';
+    document.getElementById('budgetMonthLabel').textContent = 'Бюджет: ' + data.budget.month;
+    let html = '<tr><th>Категория</th><th class="num">План</th><th class="num">Факт</th><th class="num">Остаток</th></tr>';
+    data.budget.rows.forEach(r => {
+      const cls = r.available >= 0 ? 'positive' : 'negative';
+      const nameClass = r.depth > 0 ? 'depth-1' : '';
+      html += '<tr><td class="' + nameClass + '">' + r.name + '</td>' +
+        '<td class="num">' + formatMoney(r.assigned) + '</td>' +
+        '<td class="num">' + formatMoney(r.activity) + '</td>' +
+        '<td class="num ' + cls + '">' + formatMoney(r.available) + '</td></tr>';
+    });
+    const t = data.budget.totals;
+    const totalCls = t.available >= 0 ? 'positive' : 'negative';
+    html += '<tr class="total-row"><td>Итого (' + sym + ')</td>' +
+      '<td class="num">' + formatMoney(t.assigned) + '</td>' +
+      '<td class="num">' + formatMoney(t.activity) + '</td>' +
+      '<td class="num ' + totalCls + '">' + formatMoney(t.available) + '</td></tr>';
+    document.getElementById('budgetTable').innerHTML = html;
+  }
+
+  // Старт
+  if (localStorage.getItem(STORAGE_KEY)) {
+    document.getElementById('mainScreen').style.display = 'block';
+    document.getElementById('tabs').style.display = 'flex';
+    loadSnapshot();
+  } else {
+    showSetup();
+  }
+
+  // Регистрация service worker - молча пропускаем ошибку, если страница
+  // открыта как локальный файл (file://) или хостинг без https: service
+  // worker в таких случаях просто не регистрируется, а обычный просмотр
+  // (без иконки на столе и без офлайн-кэша) при этом работает как есть.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+</script>
+</body>
+</html>
