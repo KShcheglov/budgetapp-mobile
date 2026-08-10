@@ -214,10 +214,25 @@
 
   // Dropbox-ссылка "Поделиться" по умолчанию открывает страницу
   // ПРЕДПРОСМОТРА (dl=0), а не сырой файл - для fetch() нужен именно
-  // сырой контент (dl=1).
+  // сырой контент (dl=1). Также новые ссылки /scl/ нужно конвертировать
+  // в формат /s/ для прямого скачивания, иначе CORS блокирует.
   function normalizeDropboxUrl(url) {
     url = url.trim();
     if (!url) return url;
+
+    // Новые ссылки формата dropbox.com/scl/fi/... конвертируем в dropbox.com/s/...
+    // для обхода CORS (формат /s/ отдаёт контент напрямую с нужными заголовками)
+    if (url.includes('dropbox.com/scl/fi/')) {
+      // Извлекаем ID файла из /scl/fi/{random}/{id}/filename
+      const match = url.match(/dropbox\.com\/scl\/fi\/[^\/]+\/([^\/\?]+)/);
+      if (match && match[1]) {
+        url = 'https://dl.dropboxusercontent.com/scl/fi/' + url.split('/scl/fi/')[1].split('?')[0] + '?rlkey=' +
+              (url.match(/rlkey=([^&]+)/) ? url.match(/rlkey=([^&]+)/)[1] : '');
+        return url;
+      }
+    }
+
+    // Старые ссылки - просто меняем dl=0 на dl=1
     if (url.includes('dl=0')) return url.replace('dl=0', 'dl=1');
     if (url.includes('dl=1')) return url;
     return url + (url.includes('?') ? '&' : '?') + 'dl=1';
