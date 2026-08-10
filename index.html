@@ -133,6 +133,8 @@
   .refresh-btn { width: 100%; margin-top: 4px; }
   .depth-1 { padding-left: 16px; color: var(--text-muted); }
   .depth-0 { font-weight: 600; }
+  #budgetTable tr.category-row { background: rgba(31, 157, 99, 0.08); }
+  [data-theme="light"] #budgetTable tr.category-row { background: rgba(31, 157, 99, 0.12); }
 </style>
 </head>
 <body>
@@ -371,7 +373,8 @@
     data.budget.rows.forEach(r => {
       const cls = r.available >= 0 ? 'positive' : 'negative';
       const nameClass = r.depth > 0 ? 'depth-1' : 'depth-0';
-      html += '<tr><td class="' + nameClass + '">' + r.name + '</td>' +
+      const rowClass = r.depth === 0 ? ' category-row' : '';
+      html += '<tr class="' + rowClass + '"><td class="' + nameClass + '">' + r.name + '</td>' +
         '<td class="num">' + formatMoney(r.assigned) + '</td>' +
         '<td class="num">' + formatMoney(r.activity) + '</td>' +
         '<td class="num ' + cls + '">' + formatMoney(r.available) + '</td></tr>';
