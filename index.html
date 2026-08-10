@@ -281,8 +281,15 @@
       let finalUrl = link;
       if (!link.includes('dropbox.com') && !link.includes('dropboxusercontent.com')) {
         errorBox.innerHTML = '<p class="muted">Раскрываю сокращенную ссылку...</p>';
-        const headResp = await fetch(link, { method: 'HEAD', redirect: 'follow' });
-        finalUrl = headResp.url; // Получаем финальный URL после всех редиректов
+        try {
+          // Пытаемся получить финальный URL через редирект
+          const headResp = await fetch(link, { method: 'HEAD', redirect: 'follow', mode: 'cors' });
+          finalUrl = headResp.url;
+        } catch (corsError) {
+          // Если CORS блокирует HEAD-запрос, пробуем напрямую GET с редиректом
+          const getResp = await fetch(link, { redirect: 'follow', mode: 'cors' });
+          finalUrl = getResp.url;
+        }
       }
 
       const resp = await fetch(normalizeDropboxUrl(finalUrl), { cache: 'no-store' });
@@ -290,7 +297,8 @@
       data = await resp.json();
     } catch (e) {
       errorBox.innerHTML = '<p style="color:var(--danger)">Не удалось загрузить: ' + e.message +
-        '. Проверь ссылку (кнопка "поменять ссылку" внизу) и что телефон в сети.</p>';
+        '. Проверь ссылку (кнопка "поменять ссылку" внизу) и что телефон в сети. ' +
+        'Для bit.ly используй полную Dropbox-ссылку.</p>';
       document.getElementById('setupScreen').style.display = 'none';
       document.getElementById('mainScreen').style.display = 'block';
       document.getElementById('tabs').style.display = 'flex';
