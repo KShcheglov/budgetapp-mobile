@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Фиксер иконок для PWA</title>
+<style>
+body { font-family: Arial; padding: 20px; background: #f0f0f0; }
+.container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; }
+button { background: #1f9d63; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 16px; margin: 10px 5px; }
+canvas { border: 1px solid #ccc; margin: 10px 0; }
+.preview { display: inline-block; margin: 10px; }
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Фиксер иконок для PWA</h1>
+<p>Загрузи иконку, она будет уменьшена и размещена по центру на темном фоне с правильными отступами для Android.</p>
+
+<input type="file" id="fileInput" accept="image/*">
+<br>
+<label>Размер выходной иконки:
+<select id="sizeSelect">
+<option value="192">192x192</option>
+<option value="512">512x512</option>
+</select>
+</label>
+<br>
+<button onclick="processIcon()">Обработать иконку</button>
+<button onclick="downloadIcon()" id="downloadBtn" style="display:none">Скачать</button>
+
+<div id="preview"></div>
+<canvas id="canvas" style="display:none"></canvas>
+</div>
+
+<script>
+let processedBlob = null;
+
+function processIcon() {
+  const file = document.getElementById('fileInput').files[0];
+  const size = parseInt(document.getElementById('sizeSelect').value);
+
+  if (!file) {
+    alert('Выбери файл иконки!');
+    return;
+  }
+
+  const img = new Image();
+  img.onload = function() {
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    canvas.width = size;
+    canvas.height = size;
+
+    // Заливаем фон темным цветом
+    ctx.fillStyle = '#1e2430';
+    ctx.fillRect(0, 0, size, size);
+
+    // Уменьшаем иконку до 80% размера (безопасная зона для maskable)
+    const iconSize = size * 0.8;
+    const offset = (size - iconSize) / 2;
+
+    ctx.drawImage(img, offset, offset, iconSize, iconSize);
+
+    // Конвертируем в blob
+    canvas.toBlob(function(blob) {
+      processedBlob = blob;
+
+      // Показываем превью
+      const preview = document.getElementById('preview');
+      const url = URL.createObjectURL(blob);
+      preview.innerHTML = '<div class="preview"><h3>Результат:</h3><img src="' + url + '" style="width:192px; height:192px; border:1px solid #ccc"></div>';
+
+      document.getElementById('downloadBtn').style.display = 'inline-block';
+    }, 'image/png');
+  };
+
+  img.src = URL.createObjectURL(file);
+}
+
+function downloadIcon() {
+  if (!processedBlob) return;
+
+  const size = document.getElementById('sizeSelect').value;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(processedBlob);
+  a.download = 'icon-' + size + '.png';
+  a.click();
+}
+</script>
+</body>
+</html>
