@@ -143,6 +143,7 @@
     </p>
     <input type="text" id="linkInput" placeholder="https://www.dropbox.com/scl/fi/.../budgetapp_mobile_snapshot.json?...">
     <button onclick="saveLink()">Сохранить и загрузить</button>
+    <button onclick="pasteFromClipboard()" style="margin-top:8px; background:var(--card-bg); color:var(--text)">📋 Вставить из буфера</button>
   </div>
 
   <div id="mainScreen" style="display:none">
@@ -245,6 +246,15 @@
     document.getElementById('linkInput').value = localStorage.getItem(STORAGE_KEY) || '';
   }
 
+  async function pasteFromClipboard() {
+    try {
+      const text = await navigator.clipboard.readText();
+      document.getElementById('linkInput').value = text;
+    } catch (e) {
+      alert('Не удалось прочитать буфер обмена. Вставь ссылку вручную (долгое нажатие на поле ввода).');
+    }
+  }
+
   function saveLink() {
     const link = document.getElementById('linkInput').value.trim();
     if (!link) return;
@@ -267,7 +277,15 @@
 
     let data;
     try {
-      const resp = await fetch(normalizeDropboxUrl(link), { cache: 'no-store' });
+      // Если это сокращенная ссылка (bit.ly и т.п.) - сначала резолвим её
+      let finalUrl = link;
+      if (!link.includes('dropbox.com') && !link.includes('dropboxusercontent.com')) {
+        errorBox.innerHTML = '<p class="muted">Раскрываю сокращенную ссылку...</p>';
+        const headResp = await fetch(link, { method: 'HEAD', redirect: 'follow' });
+        finalUrl = headResp.url; // Получаем финальный URL после всех редиректов
+      }
+
+      const resp = await fetch(normalizeDropboxUrl(finalUrl), { cache: 'no-store' });
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       data = await resp.json();
     } catch (e) {
