@@ -106,7 +106,8 @@
   /* Адаптация таблицы бюджета для узких экранов */
   #budgetTable { font-size: 13px; }
   #budgetTable th, #budgetTable td { padding: 4px 2px; }
-  .table-wrapper { max-height: calc(100vh - 200px); overflow-y: auto; position: relative; }
+  #page-budget .card { padding: 14px 0; }
+  .table-wrapper { max-height: calc(100vh - 200px); overflow-y: auto; position: relative; margin: 0 -14px; padding: 0 14px; }
   #budgetTable thead th { position: sticky; top: 0; background: var(--card-bg); z-index: 10; border-bottom: 2px solid var(--border); }
   input, button {
     font-size: 15px;
@@ -131,6 +132,7 @@
   .page.active { display: block; }
   .refresh-btn { width: 100%; margin-top: 4px; }
   .depth-1 { padding-left: 16px; color: var(--text-muted); }
+  .depth-0 { font-weight: 600; }
 </style>
 </head>
 <body>
@@ -368,7 +370,7 @@
     let html = '<thead><tr><th>Категория</th><th class="num">План</th><th class="num">Факт</th><th class="num">Остаток</th></tr></thead><tbody>';
     data.budget.rows.forEach(r => {
       const cls = r.available >= 0 ? 'positive' : 'negative';
-      const nameClass = r.depth > 0 ? 'depth-1' : '';
+      const nameClass = r.depth > 0 ? 'depth-1' : 'depth-0';
       html += '<tr><td class="' + nameClass + '">' + r.name + '</td>' +
         '<td class="num">' + formatMoney(r.assigned) + '</td>' +
         '<td class="num">' + formatMoney(r.activity) + '</td>' +
