@@ -327,9 +327,24 @@
     document.getElementById('mainScreen').style.display = 'block';
     document.getElementById('tabs').style.display = 'flex';
 
-    document.getElementById('updatedLine').textContent =
-      'Обновлено на компьютере: ' + data.generated_at +
+    // generated_at приходит как "YYYY-MM-DDTHH:MM" (Python isoformat) -
+    // "T" между датой и временем читается плохо на глаз, меняем на
+    // пробел и выделяем саму метку жирным - это ключевая информация
+    // (насколько свежи данные), не должна теряться на фоне подписи.
+    var generatedDisplay = (data.generated_at || '').replace('T', ' ');
+    document.getElementById('updatedLine').innerHTML =
+      'Обновлено на компьютере: <b>' + generatedDisplay + '</b>' +
       (navigator.onLine ? '' : ' (офлайн - показаны последние загруженные данные)');
+
+    // warnings - список {source, warning} - появляется, если какой-то
+    // из трёх блоков на компьютере считался по локальному кэшу без
+    // связи с drebedengi (см. backend/mobile_snapshot.py) - без этого
+    // на телефоне не было ни единого признака, что цифры могут быть
+    // устаревшими сильнее обычного.
+    if (data.warnings && data.warnings.length) {
+      errorBox.innerHTML = '<p style="color:var(--danger)">⚠ ' +
+        data.warnings.map(w => w.warning).join('; ') + '</p>';
+    }
 
     renderMoney(data);
     renderDebts(data);
