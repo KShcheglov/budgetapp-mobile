@@ -253,6 +253,12 @@
     return (kopecks / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
+  // "YYYY-MM-DDTHH:MM" (Python isoformat) -> "ДД.ММ.ГГГГ, ЧЧ:ММ".
+  function formatGeneratedAt(iso) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})/.exec(iso || '');
+    return m ? (m[3] + '.' + m[2] + '.' + m[1] + ', ' + m[4]) : (iso || '');
+  }
+
   // Dropbox-ссылка "Поделиться" по умолчанию открывает страницу
   // ПРЕДПРОСМОТРА (dl=0), а не сырой файл - для fetch() нужен именно
   // сырой контент (dl=1). Также новые ссылки /scl/ нужно конвертировать
@@ -356,10 +362,12 @@
     document.getElementById('tabs').style.display = 'flex';
 
     // generated_at приходит как "YYYY-MM-DDTHH:MM" (Python isoformat) -
-    // "T" между датой и временем читается плохо на глаз, меняем на
-    // пробел и выделяем саму метку жирным - это ключевая информация
-    // (насколько свежи данные), не должна теряться на фоне подписи.
-    var generatedDisplay = (data.generated_at || '').replace('T', ' ');
+    // "T" и голый пробел между датой и временем одинаково плохо
+    // читаются (пользователь заметил) - перекладываем в привычный
+    // "ДД.ММ.ГГГГ, ЧЧ:ММ" (запятая - обычный разделитель даты/времени),
+    // выделяем саму метку жирным - это ключевая информация (насколько
+    // свежи данные), не должна теряться на фоне подписи.
+    var generatedDisplay = formatGeneratedAt(data.generated_at);
     document.getElementById('updatedLine').innerHTML =
       'Обновлено на компьютере: <b>' + generatedDisplay + '</b>' +
       (navigator.onLine ? '' : ' (офлайн - показаны последние загруженные данные)');
