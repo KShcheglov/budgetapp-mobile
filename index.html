@@ -66,6 +66,8 @@
     --text-muted: #9fb0c3;
     --accent: #6fd3a0;
     --danger: #e08787;
+    --warning: #e0ad5c;
+    --warning-badge-bg: #4d3f22;
     --card-bg: #2a3242;
     --border: #3d4658;
   }
@@ -75,6 +77,8 @@
     --text-muted: #5b6b82;
     --accent: #1f9d63;
     --danger: #c9403f;
+    --warning: #a3701c;
+    --warning-badge-bg: #f6e8c9;
     --card-bg: #ffffff;
     --border: #d7dee8;
   }
@@ -135,6 +139,29 @@
   .depth-0 { font-weight: 600; }
   #budgetTable tr.category-row { background: rgba(31, 157, 99, 0.08); }
   [data-theme="light"] #budgetTable tr.category-row { background: rgba(31, 157, 99, 0.12); }
+
+  /* Сигнал о перерасходе - тот же третий смысловой цвет (--warning),
+     что и в десктопном приложении, отдельно от --danger (тот - уже
+     случившийся факт, этот - только прогноз). */
+  .pace-banner {
+    background: var(--warning-badge-bg); border-radius: 8px;
+    padding: 8px 10px; margin-bottom: 10px; font-size: 12.5px;
+  }
+  .pace-banner-text { color: var(--text); margin-bottom: 4px; }
+  .pace-chip {
+    display: inline-block; background: rgba(0,0,0,0.18); color: var(--warning);
+    border-radius: 999px; padding: 2px 8px; font-size: 11.5px; font-weight: 600;
+    margin: 2px 4px 0 0;
+  }
+  .pace-dot {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--warning); margin-left: 5px; vertical-align: middle;
+  }
+  #budgetTable tr.pace-row { cursor: pointer; }
+  #budgetTable tr.pace-detail-row td {
+    background: rgba(224, 173, 92, 0.08); border-bottom: 1px solid var(--border);
+  }
+  .pace-detail { color: var(--text-muted); font-size: 12px; line-height: 1.6; padding: 2px 2px 4px; }
 </style>
 </head>
 <body>
@@ -181,6 +208,7 @@
     <div class="page" id="page-budget">
       <div class="card">
         <h2 style="margin-top:0; font-size:15px" id="budgetMonthLabel">Бюджет</h2>
+        <div id="paceWarningBanner" style="display:none"></div>
         <div class="table-wrapper">
           <table id="budgetTable"></table>
         </div>
@@ -384,15 +412,31 @@
   function renderBudget(data) {
     const sym = data.display_currency_code || '';
     document.getElementById('budgetMonthLabel').textContent = 'Бюджет: ' + data.budget.month;
+    renderPaceWarnings(data.budget.overspend_warnings || []);
+
     let html = '<thead><tr><th>Категория</th><th class="num">План</th><th class="num">Факт</th><th class="num">Остаток</th></tr></thead><tbody>';
-    data.budget.rows.forEach(r => {
+    data.budget.rows.forEach((r, idx) => {
       const cls = r.available >= 0 ? 'positive' : 'negative';
       const nameClass = r.depth > 0 ? 'depth-1' : 'depth-0';
       const rowClass = r.depth === 0 ? ' category-row' : '';
-      html += '<tr class="' + rowClass + '"><td class="' + nameClass + '">' + r.name + '</td>' +
+      const pace = r.pace;
+      // Строка целиком кликабельна (не отдельно точка внутри неё) -
+      // иначе клик по точке "всплыл" бы до onclick строки и переключил
+      // видимость дважды за один тап, отменяя сам себя.
+      const detailId = 'paceDetail' + idx;
+      const tapAttr = pace ? ' class="' + rowClass.trim() + ' pace-row" onclick="togglePaceDetail(\'' + detailId + '\')"' : ' class="' + rowClass.trim() + '"';
+      const paceDot = pace ? '<span class="pace-dot"></span>' : '';
+      html += '<tr' + tapAttr + '><td class="' + nameClass + '">' + r.name + '</td>' +
         '<td class="num">' + formatMoney(r.assigned) + '</td>' +
         '<td class="num">' + formatMoney(r.activity) + '</td>' +
-        '<td class="num ' + cls + '">' + formatMoney(r.available) + '</td></tr>';
+        '<td class="num ' + cls + '">' + formatMoney(r.available) + paceDot + '</td></tr>';
+      if (pace) {
+        html += '<tr class="pace-detail-row" id="' + detailId + '" style="display:none"><td colspan="4"><div class="pace-detail">' +
+          'Последние ' + pace.window_days + ' дней: ≈ ' + formatMoney(pace.daily_rate_kopecks) + ' /день<br>' +
+          'При этом темпе: уйдёт в минус ~' + pace.crossing_day + ' числа<br>' +
+          'Ожидаемый перерасход к концу месяца: ' + formatMoney(pace.projected_shortfall_kopecks) +
+          '</div></td></tr>';
+      }
     });
     const t = data.budget.totals;
     const totalCls = t.available >= 0 ? 'positive' : 'negative';
@@ -402,6 +446,32 @@
       '<td class="num ' + totalCls + '">' + formatMoney(t.available) + '</td></tr>';
     html += '</tbody>';
     document.getElementById('budgetTable').innerHTML = html;
+  }
+
+  // Полоска-сводка над таблицей бюджета - тот же смысл, что и
+  // #paceWarningStrip в десктопном frontend/js/budget.js, отдельно от
+  // errorBox (тот - только про синхронизацию/ошибки загрузки).
+  function renderPaceWarnings(warnings) {
+    const box = document.getElementById('paceWarningBanner');
+    if (!warnings.length) {
+      box.style.display = 'none';
+      box.innerHTML = '';
+      return;
+    }
+    const chips = warnings.map(w =>
+      '<span class="pace-chip">' + w.name + ' — к ' + w.crossing_day + ' числу</span>'
+    ).join('');
+    box.innerHTML = '<div class="pace-banner-text">На повышенном темпе трат — возможен перерасход:</div>' + chips;
+    box.style.display = 'block';
+  }
+
+  // Тап по строке с сигналом - показать/скрыть подробности (последние N
+  // дней/день ухода в минус/прогноз недостачи) прямо под ней. Не
+  // всплывающая карточка, как на десктопе - на узком экране проще и
+  // надёжнее раскрывать строку таблицы, чем позиционировать поповер.
+  function togglePaceDetail(id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = el.style.display === 'none' ? 'table-row' : 'none';
   }
 
   // Старт
