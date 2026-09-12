@@ -199,6 +199,13 @@
     margin: 10px 0; font-size: 14px;
   }
   .link-action { text-decoration: underline; cursor: pointer; }
+  /* Число вручную синхронизировано с CACHE_NAME в sw.js (поднимать
+     оба при каждой правке index.html/sw.js) - позволяет на глаз
+     отличить "правда обновилось" от "ещё старый закэшированный
+     service worker" вместо гадания по симптомам. Рядом с заголовком
+     "Мой Бюджет" на всех трёх экранах (замок/настройка/основной),
+     чтобы быть видно сразу, а не искать метку в углу экрана. */
+  .version-tag { font-size: 11px; font-weight: normal; color: var(--text-muted); opacity: 0.75; }
 </style>
 </head>
 <body>
@@ -206,7 +213,7 @@
   <div id="lockScreen" style="display:none">
     <div class="lock-box">
       <div class="lock-icon">🔒</div>
-      <h1>Мой Бюджет</h1>
+      <h1>Мой Бюджет <span class="version-tag">v13</span></h1>
       <!-- Биометрия - ПЕРВОЙ и заметной кнопкой, не автоматически: у
            WebAuthn нет способа надёжно запросить Face ID/отпечаток без
            настоящего тапа пользователя (проверено на реальных
@@ -224,7 +231,7 @@
   </div>
 
   <div id="setupScreen" style="display:none">
-    <h1>Мой Бюджет — телефон</h1>
+    <h1>Мой Бюджет — телефон <span class="version-tag">v13</span></h1>
     <p class="muted">
       Первый запуск - вставь Dropbox-ссылку "Поделиться" на файл
       <code>budgetapp_mobile_snapshot.json</code> (создаётся десктопным
@@ -242,7 +249,7 @@
 
   <div id="mainScreen" style="display:none">
     <div style="display:flex; justify-content:space-between; align-items:center">
-      <h1 style="margin:4px 0">Мой Бюджет</h1>
+      <h1 style="margin:4px 0">Мой Бюджет <span class="version-tag">v13</span></h1>
       <button id="themeToggleBtn" onclick="toggleTheme()" style="width:auto; padding:8px 12px; background:var(--card-bg); color:var(--text); font-size:16px">🌙</button>
     </div>
     <div class="updated" id="updatedLine"></div>
@@ -286,20 +293,6 @@
     <button class="tab-btn" data-page="debts" onclick="showTab('debts')">📋 Долги</button>
     <button class="tab-btn" data-page="budget" onclick="showTab('budget')">📊 Бюджет</button>
   </div>
-
-  <!-- ВСЕГДА видно, независимо от того, какой из экранов (замок/
-       настройка/основной) сейчас показан - специально ВНЕ тех div'ов,
-       которые show/hide переключают между собой. Число вручную
-       синхронизировано с CACHE_NAME в sw.js (то же самое "поднять при
-       каждой правке index.html/sw.js") - позволяет на глаз отличить
-       "правда обновилось" от "ещё старый закэшированный service worker"
-       вместо гадания по симптомам. -->
-  <!-- bottom:46px, а не 2px - панель вкладок (.tabs) сама фиксирована
-       внизу экрана со сплошным фоном высотой примерно с эту величину;
-       на bottom:2px метка версии физически рисовалась ПОД её фоном и
-       была не видна вообще, независимо от z-index (это про то, ЧТО
-       где нарисовано на экране, z-index тут был ни при чём). -->
-  <div style="position:fixed; bottom:46px; right:6px; font-size:11px; color:var(--text-muted); opacity:0.75; z-index:100">v12</div>
 
 <script>
   const STORAGE_KEY = 'budgetapp_mobile_dropbox_link';
