@@ -213,7 +213,7 @@
   <div id="lockScreen" style="display:none">
     <div class="lock-box">
       <div class="lock-icon">🔒</div>
-      <h1>Мой Бюджет <span class="version-tag">v14</span></h1>
+      <h1>Мой Бюджет <span class="version-tag">v15</span></h1>
       <!-- Биометрия - ПЕРВОЙ и заметной кнопкой, не автоматически: у
            WebAuthn нет способа надёжно запросить Face ID/отпечаток без
            настоящего тапа пользователя (проверено на реальных
@@ -231,7 +231,7 @@
   </div>
 
   <div id="setupScreen" style="display:none">
-    <h1>Мой Бюджет — телефон <span class="version-tag">v14</span></h1>
+    <h1>Мой Бюджет — телефон <span class="version-tag">v15</span></h1>
     <p class="muted">
       Первый запуск - вставь Dropbox-ссылку "Поделиться" на файл
       <code>budgetapp_mobile_snapshot.json</code> (создаётся десктопным
@@ -249,7 +249,7 @@
 
   <div id="mainScreen" style="display:none">
     <div style="display:flex; justify-content:space-between; align-items:center">
-      <h1 style="margin:4px 0">Мой Бюджет <span class="version-tag">v14</span></h1>
+      <h1 style="margin:4px 0">Мой Бюджет <span class="version-tag">v15</span></h1>
       <button id="themeToggleBtn" onclick="toggleTheme()" style="width:auto; padding:8px 12px; background:var(--card-bg); color:var(--text); font-size:16px">🌙</button>
     </div>
     <div class="updated" id="updatedLine"></div>
@@ -301,6 +301,7 @@
   const PIN_HASH_KEY = 'budgetapp_mobile_pin_hash';
   const BIOMETRIC_KEY = 'budgetapp_mobile_biometric_cred_id';
   let appUnlocked = false; // только в памяти - НЕ localStorage, иначе "разблокировано" пережило бы закрытие вкладки
+  let swRegistration = null; // см. регистрацию service worker в конце файла - используется для принудительной проверки обновления при каждом "Обновить", не только при открытии
 
   // Сама тема уже применена раньше (см. inline-скрипт в <head> - там же
   // объяснение, почему это должно случиться ДО рендера). Тут только
@@ -386,6 +387,7 @@
   }
 
   async function loadSnapshot() {
+    if (swRegistration) swRegistration.update(); // заодно проверить новую версию страницы - тот же повод, что и "Обновить" данные
     const link = localStorage.getItem(STORAGE_KEY);
     if (!link) { showSetup(); return; }
 
@@ -802,8 +804,30 @@
   // открыта как локальный файл (file://) или хостинг без https: service
   // worker в таких случаях просто не регистрируется, а обычный просмотр
   // (без иконки на столе и без офлайн-кэша) при этом работает как есть.
+  //
+  // Раньше только register() без ничего - браузер сам решает, КОГДА
+  // проверять sw.js на новую версию, и это может затянуться (реальный
+  // случай: пользователь закрывал и обновлял страницу несколько раз
+  // подряд, новая версия так и не подхватывалась, помогло только полное
+  // "Очистить и сбросить" сайта в браузере - а это заодно стирает
+  // localStorage, то есть ссылку на Dropbox и PIN, которые пришлось
+  // настраивать заново). Явный reg.update() при каждом открытии и при
+  // каждом "Обновить" (см. loadSnapshot) форсирует проверку сразу, не
+  // дожидаясь браузерного таймера - а автоматический reload ровно один
+  // раз при смене активного SW (controllerchange) подхватывает новую
+  // версию сам, без ручного тыканья "обновить" по многу раз. localStorage
+  // это не трогает вообще - PIN и ссылка на Dropbox остаются на месте.
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    let swReloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (swReloaded) return; // защита от двойного reload, если событие вдруг придёт больше одного раза
+      swReloaded = true;
+      location.reload();
+    });
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      swRegistration = reg;
+      reg.update();
+    }).catch(() => {});
   }
 </script>
 </body>
