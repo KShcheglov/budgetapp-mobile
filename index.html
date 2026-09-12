@@ -179,9 +179,42 @@
     background: rgba(224, 173, 92, 0.08); border-bottom: 1px solid var(--border);
   }
   .pace-detail { color: var(--text-muted); font-size: 12px; line-height: 1.6; padding: 2px 2px 4px; }
+
+  /* Защита входа (PIN + опционально биометрия через WebAuthn) - см.
+     обсуждение в чате: страница статическая, без сервера, поэтому это
+     локальный замок на телефоне ("Face ID совпал - показать данные"),
+     а не настоящая удалённая аутентификация с проверкой подписи - для
+     угрозы "кто-то взял мой разблокированный телефон" этого достаточно. */
+  .lock-box { max-width: 320px; margin: 15vh auto 0; text-align: center; }
+  .lock-icon { font-size: 40px; margin-bottom: 8px; }
+  .pin-input { text-align: center; font-size: 26px; letter-spacing: 10px; }
+  .lock-error { color: var(--danger); font-size: 13px; min-height: 18px; margin: 2px 0 8px; }
+  .lock-settings-box {
+    margin: 16px 0; padding: 16px; background: var(--card-bg);
+    border: 1px solid var(--border); border-radius: 10px; text-align: left;
+  }
+  .lock-settings-box h3 { margin-top: 0; font-size: 15px; }
+  .lock-settings-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin: 10px 0; font-size: 14px;
+  }
+  .link-action { text-decoration: underline; cursor: pointer; }
 </style>
 </head>
 <body>
+
+  <div id="lockScreen" style="display:none">
+    <div class="lock-box">
+      <div class="lock-icon">🔒</div>
+      <h1>Мой Бюджет</h1>
+      <p class="muted">Введи PIN-код</p>
+      <button id="biometricUnlockBtn" style="display:none; margin-bottom:10px" onclick="handleBiometricUnlockTap()">🫆 Войти по отпечатку / Face ID</button>
+      <input type="tel" inputmode="numeric" pattern="[0-9]*" maxlength="6" id="pinInput" class="pin-input"
+             placeholder="••••" autocomplete="off" onkeydown="if(event.key==='Enter') handlePinSubmit()">
+      <div class="lock-error" id="pinError"></div>
+      <button onclick="handlePinSubmit()">Войти</button>
+    </div>
+  </div>
 
   <div id="setupScreen" style="display:none">
     <h1>Мой Бюджет — телефон</h1>
@@ -234,8 +267,11 @@
 
     <button class="refresh-btn" onclick="loadSnapshot()">↻ Обновить</button>
     <p class="muted" style="text-align:center; margin-top:10px">
-      <span onclick="showSetup()" style="text-decoration:underline">поменять ссылку</span>
+      <span onclick="showSetup()" class="link-action">поменять ссылку</span>
+      ·
+      <span onclick="toggleLockSettings()" class="link-action">защита входа</span>
     </p>
+    <div id="lockSettingsBox" class="lock-settings-box" style="display:none"></div>
   </div>
 
   <div class="tabs" id="tabs" style="display:none">
@@ -247,6 +283,10 @@
 <script>
   const STORAGE_KEY = 'budgetapp_mobile_dropbox_link';
   const THEME_KEY = 'budgetapp_mobile_theme';
+  const PIN_SALT_KEY = 'budgetapp_mobile_pin_salt';
+  const PIN_HASH_KEY = 'budgetapp_mobile_pin_hash';
+  const BIOMETRIC_KEY = 'budgetapp_mobile_biometric_cred_id';
+  let appUnlocked = false; // только в памяти - НЕ localStorage, иначе "разблокировано" пережило бы закрытие вкладки
 
   // Сама тема уже применена раньше (см. inline-скрипт в <head> - там же
   // объяснение, почему это должно случиться ДО рендера). Тут только
@@ -499,14 +539,217 @@
     if (el) el.style.display = el.style.display === 'none' ? 'table-row' : 'none';
   }
 
-  // Старт
-  if (localStorage.getItem(STORAGE_KEY)) {
-    document.getElementById('mainScreen').style.display = 'block';
-    document.getElementById('tabs').style.display = 'flex';
-    loadSnapshot();
-  } else {
-    showSetup();
+  // ===================== Защита входа (PIN + биометрия) =====================
+  // Локальный замок на телефоне, не удалённая аутентификация - см.
+  // комментарий у .lock-box в <style>. crypto.subtle/PublicKeyCredential
+  // требуют secure context (https или localhost) - на file:// или http
+  // без TLS защита недоступна, страница просто не предложит её включить.
+
+  async function sha256Hex(text) {
+    const enc = new TextEncoder().encode(text);
+    const buf = await crypto.subtle.digest('SHA-256', enc);
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
   }
+  async function hashPin(pin, salt) {
+    return sha256Hex(salt + ':' + pin);
+  }
+  function isLockEnabled() {
+    return !!localStorage.getItem(PIN_HASH_KEY);
+  }
+
+  // WebAuthn "platform authenticator" (Touch ID/Face ID/отпечаток на
+  // Android) - create() один раз при включении в настройках, get()
+  // при каждой разблокировке. Публичный ключ никуда не отправляется
+  // (некуда - страница статическая), сам факт успешного get() без
+  // исключения означает "биометрия совпала" - этого достаточно для
+  // локального замка, настоящая проверка подписи тут не нужна.
+  async function tryBiometricUnlock() {
+    const idB64 = localStorage.getItem(BIOMETRIC_KEY);
+    if (!idB64 || !window.PublicKeyCredential) return false;
+    try {
+      const rawId = Uint8Array.from(atob(idB64), c => c.charCodeAt(0));
+      const challenge = crypto.getRandomValues(new Uint8Array(32));
+      await navigator.credentials.get({
+        publicKey: { challenge, allowCredentials: [{ id: rawId, type: 'public-key' }], userVerification: 'required', timeout: 60000 }
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function proceedToApp() {
+    if (localStorage.getItem(STORAGE_KEY)) {
+      document.getElementById('mainScreen').style.display = 'block';
+      document.getElementById('tabs').style.display = 'flex';
+      loadSnapshot();
+    } else {
+      showSetup();
+    }
+  }
+
+  function showLockScreen() {
+    document.getElementById('setupScreen').style.display = 'none';
+    document.getElementById('mainScreen').style.display = 'none';
+    document.getElementById('tabs').style.display = 'none';
+    document.getElementById('lockScreen').style.display = 'block';
+    document.getElementById('pinInput').value = '';
+    document.getElementById('pinError').textContent = '';
+    document.getElementById('biometricUnlockBtn').style.display =
+      (localStorage.getItem(BIOMETRIC_KEY) && window.PublicKeyCredential) ? 'block' : 'none';
+    setTimeout(() => document.getElementById('pinInput').focus(), 50);
+  }
+
+  function bootApp() {
+    if (isLockEnabled() && !appUnlocked) {
+      showLockScreen();
+    } else {
+      proceedToApp();
+    }
+  }
+
+  async function handleBiometricUnlockTap() {
+    const errorEl = document.getElementById('pinError');
+    errorEl.textContent = '';
+    const ok = await tryBiometricUnlock();
+    if (ok) {
+      appUnlocked = true;
+      document.getElementById('lockScreen').style.display = 'none';
+      proceedToApp();
+    } else {
+      errorEl.textContent = 'Не удалось подтвердить - попробуй PIN.';
+    }
+  }
+
+  async function handlePinSubmit() {
+    const pin = document.getElementById('pinInput').value.trim();
+    const errorEl = document.getElementById('pinError');
+    if (!pin) { errorEl.textContent = 'Введи PIN-код.'; return; }
+    const salt = localStorage.getItem(PIN_SALT_KEY) || '';
+    const hash = await hashPin(pin, salt);
+    if (hash === localStorage.getItem(PIN_HASH_KEY)) {
+      appUnlocked = true;
+      document.getElementById('lockScreen').style.display = 'none';
+      proceedToApp();
+    } else {
+      errorEl.textContent = 'Неверный PIN.';
+      document.getElementById('pinInput').value = '';
+    }
+  }
+
+  // ---- Настройки защиты (кнопка "защита входа" на главном экране) ----
+
+  function toggleLockSettings() {
+    const box = document.getElementById('lockSettingsBox');
+    if (box.style.display === 'none') {
+      renderLockSettings();
+      box.style.display = 'block';
+    } else {
+      box.style.display = 'none';
+    }
+  }
+
+  async function renderLockSettings() {
+    const box = document.getElementById('lockSettingsBox');
+    if (!(window.crypto && window.crypto.subtle)) {
+      box.innerHTML = '<p class="muted">Защита входа недоступна - страница должна быть открыта через https ' +
+        '(см. инструкцию по установке в README), локальный файл или обычный http этого не поддерживают.</p>';
+      return;
+    }
+    const pinSet = isLockEnabled();
+    let biometricAvailable = false;
+    if (window.PublicKeyCredential && PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable) {
+      try { biometricAvailable = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(); } catch (e) {}
+    }
+    const biometricSet = !!localStorage.getItem(BIOMETRIC_KEY);
+
+    let html = '<h3>Защита входа</h3>';
+    if (!pinSet) {
+      html += '<p class="muted">PIN-код не задан - открыть приложение может кто угодно с доступом к телефону.</p>' +
+        '<input type="tel" inputmode="numeric" pattern="[0-9]*" maxlength="6" id="newPin1" placeholder="Новый PIN (4-6 цифр)">' +
+        '<input type="tel" inputmode="numeric" pattern="[0-9]*" maxlength="6" id="newPin2" placeholder="Повтори PIN">' +
+        '<div class="lock-error" id="pinSetupError"></div>' +
+        '<button onclick="savePinSetup()">Сохранить PIN</button>';
+    } else {
+      html += '<div class="lock-settings-row"><span>PIN-код установлен</span>' +
+        '<span onclick="disableLock()" class="link-action negative">отключить</span></div>';
+      if (biometricAvailable) {
+        html += '<div class="lock-settings-row"><span>Вход по отпечатку/Face ID</span>' +
+          (biometricSet
+            ? '<span onclick="disableBiometric()" class="link-action negative">отключить</span>'
+            : '<span onclick="setupBiometric()" class="link-action positive">включить</span>') +
+          '</div>';
+      }
+      html += '<div class="lock-error" id="lockSettingsMsg"></div>';
+    }
+    box.innerHTML = html;
+  }
+
+  async function savePinSetup() {
+    const p1 = document.getElementById('newPin1').value.trim();
+    const p2 = document.getElementById('newPin2').value.trim();
+    const err = document.getElementById('pinSetupError');
+    if (!/^[0-9]{4,6}$/.test(p1)) { err.textContent = 'PIN - от 4 до 6 цифр.'; return; }
+    if (p1 !== p2) { err.textContent = 'PIN-коды не совпадают.'; return; }
+    const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+    const salt = Array.from(saltBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    localStorage.setItem(PIN_SALT_KEY, salt);
+    localStorage.setItem(PIN_HASH_KEY, await hashPin(p1, salt));
+    appUnlocked = true; // только что ввёл его сам - не заставлять вводить снова тут же
+    renderLockSettings();
+  }
+
+  function disableLock() {
+    if (!confirm('Отключить защиту входа?')) return;
+    localStorage.removeItem(PIN_HASH_KEY);
+    localStorage.removeItem(PIN_SALT_KEY);
+    localStorage.removeItem(BIOMETRIC_KEY);
+    renderLockSettings();
+  }
+
+  async function setupBiometric() {
+    const msg = document.getElementById('lockSettingsMsg');
+    try {
+      const challenge = crypto.getRandomValues(new Uint8Array(32));
+      const userId = crypto.getRandomValues(new Uint8Array(16));
+      const cred = await navigator.credentials.create({
+        publicKey: {
+          challenge, rp: { name: 'Мой Бюджет' },
+          user: { id: userId, name: 'budgetapp', displayName: 'Мой Бюджет' },
+          pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+          authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
+          timeout: 60000,
+        }
+      });
+      const idB64 = btoa(String.fromCharCode(...new Uint8Array(cred.rawId)));
+      localStorage.setItem(BIOMETRIC_KEY, idB64);
+      renderLockSettings();
+    } catch (e) {
+      msg.textContent = 'Не удалось включить: ' + e.message;
+    }
+  }
+
+  function disableBiometric() {
+    localStorage.removeItem(BIOMETRIC_KEY);
+    renderLockSettings();
+  }
+
+  // Возврат из фона (переключился на другое приложение и обратно) -
+  // повторно запросить разблокировку, а не просто оставить данные
+  // видимыми. Лучшее, что доступно обычной PWA без нативных API - не
+  // "редактирование" контента в списке недавних приложений (это умеют
+  // только нативные приложения), а быстрый повторный показ замка.
+  document.addEventListener('visibilitychange', () => {
+    if (!isLockEnabled()) return;
+    if (document.visibilityState === 'hidden') {
+      appUnlocked = false;
+    } else if (document.visibilityState === 'visible' && !appUnlocked) {
+      showLockScreen();
+    }
+  });
+
+  // Старт
+  bootApp();
 
   // Регистрация service worker - молча пропускаем ошибку, если страница
   // открыта как локальный файл (file://) или хостинг без https: service
