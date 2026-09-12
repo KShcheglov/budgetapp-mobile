@@ -595,9 +595,20 @@
     document.getElementById('lockScreen').style.display = 'block';
     document.getElementById('pinInput').value = '';
     document.getElementById('pinError').textContent = '';
-    document.getElementById('biometricUnlockBtn').style.display =
-      (localStorage.getItem(BIOMETRIC_KEY) && window.PublicKeyCredential) ? 'block' : 'none';
+    const biometricReady = !!(localStorage.getItem(BIOMETRIC_KEY) && window.PublicKeyCredential);
+    document.getElementById('biometricUnlockBtn').style.display = biometricReady ? 'block' : 'none';
     setTimeout(() => document.getElementById('pinInput').focus(), 50);
+    // Одновременно с полем PIN - сразу сами пробуем биометрию, не
+    // дожидаясь тапа по кнопке (пользователь попросил именно так - не
+    // лишний шаг, а оба способа сразу). Кнопка остаётся видимой как
+    // ручной повтор - на части браузеров/ОС автоматический вызов без
+    // "свежего" пользовательского жеста может тихо не сработать
+    // (особенность WebAuthn, не наш баг) - тогда PIN-поле уже готово
+    // к вводу, ничего не сломано, просто биометрия в этот раз молча
+    // не предложилась сама.
+    if (biometricReady) {
+      tryBiometricUnlock().then(ok => { if (ok) unlockAndProceed(); });
+    }
   }
 
   function bootApp() {
@@ -608,14 +619,19 @@
     }
   }
 
+  function unlockAndProceed() {
+    if (appUnlocked) return; // уже разблокировано другим путём (PIN и биометрия почти одновременно) - не грузить снимок дважды
+    appUnlocked = true;
+    document.getElementById('lockScreen').style.display = 'none';
+    proceedToApp();
+  }
+
   async function handleBiometricUnlockTap() {
     const errorEl = document.getElementById('pinError');
     errorEl.textContent = '';
     const ok = await tryBiometricUnlock();
     if (ok) {
-      appUnlocked = true;
-      document.getElementById('lockScreen').style.display = 'none';
-      proceedToApp();
+      unlockAndProceed();
     } else {
       errorEl.textContent = 'Не удалось подтвердить - попробуй PIN.';
     }
@@ -628,9 +644,7 @@
     const salt = localStorage.getItem(PIN_SALT_KEY) || '';
     const hash = await hashPin(pin, salt);
     if (hash === localStorage.getItem(PIN_HASH_KEY)) {
-      appUnlocked = true;
-      document.getElementById('lockScreen').style.display = 'none';
-      proceedToApp();
+      unlockAndProceed();
     } else {
       errorEl.textContent = 'Неверный PIN.';
       document.getElementById('pinInput').value = '';
