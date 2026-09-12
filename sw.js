@@ -8,7 +8,7 @@
 //    успешно загруженную версию из кэша, чтобы страница не была
 //    пустой в метро/самолёте, только со старой пометкой "Обновлено...".
 
-const CACHE_NAME = 'budgetapp-mobile-v8';
+const CACHE_NAME = 'budgetapp-mobile-v9';
 const APP_SHELL = ['./', './index.html', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {

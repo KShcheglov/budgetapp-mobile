@@ -280,6 +280,15 @@
     <button class="tab-btn" data-page="budget" onclick="showTab('budget')">📊 Бюджет</button>
   </div>
 
+  <!-- ВСЕГДА видно, независимо от того, какой из экранов (замок/
+       настройка/основной) сейчас показан - специально ВНЕ тех div'ов,
+       которые show/hide переключают между собой. Число вручную
+       синхронизировано с CACHE_NAME в sw.js (то же самое "поднять при
+       каждой правке index.html/sw.js") - позволяет на глаз отличить
+       "правда обновилось" от "ещё старый закэшированный service worker"
+       вместо гадания по симптомам. -->
+  <div style="position:fixed; bottom:2px; right:6px; font-size:10px; color:var(--text-muted); opacity:0.55; z-index:100">v9</div>
+
 <script>
   const STORAGE_KEY = 'budgetapp_mobile_dropbox_link';
   const THEME_KEY = 'budgetapp_mobile_theme';
