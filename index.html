@@ -299,7 +299,7 @@
        на bottom:2px метка версии физически рисовалась ПОД её фоном и
        была не видна вообще, независимо от z-index (это про то, ЧТО
        где нарисовано на экране, z-index тут был ни при чём). -->
-  <div style="position:fixed; bottom:46px; right:6px; font-size:11px; color:var(--text-muted); opacity:0.75; z-index:100">v10</div>
+  <div style="position:fixed; bottom:46px; right:6px; font-size:11px; color:var(--text-muted); opacity:0.75; z-index:100">v11</div>
 
 <script>
   const STORAGE_KEY = 'budgetapp_mobile_dropbox_link';
@@ -616,16 +616,20 @@
     document.getElementById('lockScreen').style.display = 'block';
     document.getElementById('pinInput').value = '';
     document.getElementById('pinError').textContent = '';
-    // Автозапуск без тапа ПРОВЕРЕН на реальных телефонах и снят - у
-    // WebAuthn нет надёжного способа вызвать проверку без настоящего
-    // пользовательского жеста (на одних устройствах не срабатывает
-    // вообще, на других - только если жест уже был по другой причине,
-    // например обновление страницы) - это ограничение самого API, не
-    // наш код. Вместо борьбы с ним - kнопка биометрии, если включена,
-    // показывается ПЕРВОЙ и заметной (см. разметку), один явный тап.
+    // Надёжность автозапуска WebAuthn без тапа РАЗНАЯ на разных
+    // прошивках (проверено на реальных телефонах - на части устройств
+    // не работает вовсе, на других работает через раз) - это
+    // ограничение самого API, не наш код. Раз пользователь подтвердил,
+    // что там, где работает, это удобнее - оставляем ОБА пути сразу:
+    // пробуем автоматически в фоне (сработает - отлично, не сработает -
+    // молча ничего не произойдёт), и ПАРАЛЛЕЛЬНО кнопка остаётся первой
+    // и заметной как надёжный запасной вариант (не только PIN).
     const biometricReady = !!(localStorage.getItem(BIOMETRIC_KEY) && window.PublicKeyCredential);
     document.getElementById('biometricUnlockBtn').style.display = biometricReady ? 'block' : 'none';
     setTimeout(() => document.getElementById('pinInput').focus(), 50);
+    if (biometricReady) {
+      tryBiometricUnlock().then(ok => { if (ok) unlockAndProceed(); });
+    }
   }
 
   function bootApp() {
