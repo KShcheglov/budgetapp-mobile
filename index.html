@@ -207,12 +207,19 @@
     <div class="lock-box">
       <div class="lock-icon">🔒</div>
       <h1>Мой Бюджет</h1>
-      <p class="muted">Введи PIN-код</p>
-      <button id="biometricUnlockBtn" style="display:none; margin-bottom:10px" onclick="handleBiometricUnlockTap()">🫆 Войти по отпечатку / Face ID</button>
+      <!-- Биометрия - ПЕРВОЙ и заметной кнопкой, не автоматически: у
+           WebAuthn нет способа надёжно запросить Face ID/отпечаток без
+           настоящего тапа пользователя (проверено на реальных
+           телефонах - без тапа не срабатывает вообще или срабатывает
+           через раз, по-разному на разных прошивках) - это ограничение
+           самого API, не наш баг, так что вместо борьбы с ним самый
+           короткий путь - один заметный тап. -->
+      <button id="biometricUnlockBtn" style="display:none; font-size:16px; padding:14px" onclick="handleBiometricUnlockTap()">🫆 Войти по отпечатку / Face ID</button>
+      <p class="muted" id="pinPrompt">Введи PIN-код</p>
       <input type="tel" inputmode="numeric" pattern="[0-9]*" maxlength="6" id="pinInput" class="pin-input"
              placeholder="••••" autocomplete="off" onkeydown="if(event.key==='Enter') handlePinSubmit()">
       <div class="lock-error" id="pinError"></div>
-      <button onclick="handlePinSubmit()">Войти</button>
+      <button onclick="handlePinSubmit()">Войти по PIN</button>
     </div>
   </div>
 
@@ -287,7 +294,12 @@
        каждой правке index.html/sw.js") - позволяет на глаз отличить
        "правда обновилось" от "ещё старый закэшированный service worker"
        вместо гадания по симптомам. -->
-  <div style="position:fixed; bottom:2px; right:6px; font-size:10px; color:var(--text-muted); opacity:0.55; z-index:100">v9</div>
+  <!-- bottom:46px, а не 2px - панель вкладок (.tabs) сама фиксирована
+       внизу экрана со сплошным фоном высотой примерно с эту величину;
+       на bottom:2px метка версии физически рисовалась ПОД её фоном и
+       была не видна вообще, независимо от z-index (это про то, ЧТО
+       где нарисовано на экране, z-index тут был ни при чём). -->
+  <div style="position:fixed; bottom:46px; right:6px; font-size:11px; color:var(--text-muted); opacity:0.75; z-index:100">v10</div>
 
 <script>
   const STORAGE_KEY = 'budgetapp_mobile_dropbox_link';
@@ -604,20 +616,16 @@
     document.getElementById('lockScreen').style.display = 'block';
     document.getElementById('pinInput').value = '';
     document.getElementById('pinError').textContent = '';
+    // Автозапуск без тапа ПРОВЕРЕН на реальных телефонах и снят - у
+    // WebAuthn нет надёжного способа вызвать проверку без настоящего
+    // пользовательского жеста (на одних устройствах не срабатывает
+    // вообще, на других - только если жест уже был по другой причине,
+    // например обновление страницы) - это ограничение самого API, не
+    // наш код. Вместо борьбы с ним - kнопка биометрии, если включена,
+    // показывается ПЕРВОЙ и заметной (см. разметку), один явный тап.
     const biometricReady = !!(localStorage.getItem(BIOMETRIC_KEY) && window.PublicKeyCredential);
     document.getElementById('biometricUnlockBtn').style.display = biometricReady ? 'block' : 'none';
     setTimeout(() => document.getElementById('pinInput').focus(), 50);
-    // Одновременно с полем PIN - сразу сами пробуем биометрию, не
-    // дожидаясь тапа по кнопке (пользователь попросил именно так - не
-    // лишний шаг, а оба способа сразу). Кнопка остаётся видимой как
-    // ручной повтор - на части браузеров/ОС автоматический вызов без
-    // "свежего" пользовательского жеста может тихо не сработать
-    // (особенность WebAuthn, не наш баг) - тогда PIN-поле уже готово
-    // к вводу, ничего не сломано, просто биометрия в этот раз молча
-    // не предложилась сама.
-    if (biometricReady) {
-      tryBiometricUnlock().then(ok => { if (ok) unlockAndProceed(); });
-    }
   }
 
   function bootApp() {
