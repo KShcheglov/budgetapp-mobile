@@ -213,7 +213,7 @@
   <div id="lockScreen" style="display:none">
     <div class="lock-box">
       <div class="lock-icon">🔒</div>
-      <h1>Мой Бюджет <span class="version-tag">v15</span></h1>
+      <h1>Мой Бюджет <span class="version-tag">v16</span></h1>
       <!-- Биометрия - ПЕРВОЙ и заметной кнопкой, не автоматически: у
            WebAuthn нет способа надёжно запросить Face ID/отпечаток без
            настоящего тапа пользователя (проверено на реальных
@@ -231,7 +231,7 @@
   </div>
 
   <div id="setupScreen" style="display:none">
-    <h1>Мой Бюджет — телефон <span class="version-tag">v15</span></h1>
+    <h1>Мой Бюджет — телефон <span class="version-tag">v16</span></h1>
     <p class="muted">
       Первый запуск - вставь Dropbox-ссылку "Поделиться" на файл
       <code>budgetapp_mobile_snapshot.json</code> (создаётся десктопным
@@ -249,7 +249,7 @@
 
   <div id="mainScreen" style="display:none">
     <div style="display:flex; justify-content:space-between; align-items:center">
-      <h1 style="margin:4px 0">Мой Бюджет <span class="version-tag">v15</span></h1>
+      <h1 style="margin:4px 0">Мой Бюджет <span class="version-tag">v16</span></h1>
       <button id="themeToggleBtn" onclick="toggleTheme()" style="width:auto; padding:8px 12px; background:var(--card-bg); color:var(--text); font-size:16px">🌙</button>
     </div>
     <div class="updated" id="updatedLine"></div>
@@ -323,6 +323,18 @@
 
   function formatMoney(kopecks) {
     return (kopecks / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  // Любая строка из снимка (названия счетов/категорий, тексты ошибок и
+  // предупреждений) перед вставкой в HTML - через это. Тот же баг, что
+  // уже был исправлен на десктопе (frontend/js/utils.js): имя с кавычкой,
+  // < или & ломало разметку или показывалось как теги.
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
   // "YYYY-MM-DDTHH:MM" (Python isoformat) -> "ДД.ММ.ГГГГ, ЧЧ:ММ".
@@ -415,7 +427,7 @@
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       data = await resp.json();
     } catch (e) {
-      errorBox.innerHTML = '<p style="color:var(--danger)">Не удалось загрузить: ' + e.message +
+      errorBox.innerHTML = '<p style="color:var(--danger)">Не удалось загрузить: ' + escapeHtml(e.message) +
         '. Проверь ссылку (кнопка "поменять ссылку" внизу) и что телефон в сети. ' +
         'Для bit.ly используй полную Dropbox-ссылку.</p>';
       document.getElementById('setupScreen').style.display = 'none';
@@ -425,7 +437,7 @@
     }
 
     if (!data.ok) {
-      errorBox.innerHTML = '<p style="color:var(--danger)">Снимок с ошибкой: ' + (data.error || '?') + '</p>';
+      errorBox.innerHTML = '<p style="color:var(--danger)">Снимок с ошибкой: ' + escapeHtml(data.error || '?') + '</p>';
       return;
     }
     errorBox.innerHTML = '';
@@ -442,7 +454,7 @@
     // свежи данные), не должна теряться на фоне подписи.
     var generatedDisplay = formatGeneratedAt(data.generated_at);
     document.getElementById('updatedLine').innerHTML =
-      'Обновлено на компьютере: <b>' + generatedDisplay + '</b>' +
+      'Обновлено на компьютере: <b>' + escapeHtml(generatedDisplay) + '</b>' +
       (navigator.onLine ? '' : ' (офлайн - показаны последние загруженные данные)');
 
     // warnings - список {source, warning} - появляется, если какой-то
@@ -452,7 +464,7 @@
     // устаревшими сильнее обычного.
     if (data.warnings && data.warnings.length) {
       errorBox.innerHTML = '<p style="color:var(--danger)">⚠ ' +
-        data.warnings.map(w => w.warning).join('; ') + '</p>';
+        escapeHtml(data.warnings.map(w => w.warning).join('; ')) + '</p>';
     }
 
     renderMoney(data);
@@ -462,11 +474,11 @@
   }
 
   function renderMoney(data) {
-    const sym = data.display_currency_code || '';
+    const sym = escapeHtml(data.display_currency_code || '');
     let html = '<tr><th>Счёт</th><th class="num">Сумма</th></tr>';
     data.money.rows.forEach(r => {
-      html += '<tr><td>' + r.account + '</td><td class="num">' +
-        formatMoney(r.amount_kopecks) + ' ' + r.code + '</td></tr>';
+      html += '<tr><td>' + escapeHtml(r.account) + '</td><td class="num">' +
+        formatMoney(r.amount_kopecks) + ' ' + escapeHtml(r.code) + '</td></tr>';
     });
     html += '<tr class="total-row"><td>Итого (≈ ' + sym + ')</td><td class="num">' +
       formatMoney(data.money.total_converted_kopecks) + ' ' + sym + '</td></tr>';
@@ -474,7 +486,7 @@
   }
 
   function renderDebts(data) {
-    const sym = data.display_currency_code || '';
+    const sym = escapeHtml(data.display_currency_code || '');
     if (!data.debts.rows.length) {
       document.getElementById('debtsTable').innerHTML = '<tr><td class="muted">Долгов нет.</td></tr>';
       return;
@@ -482,8 +494,8 @@
     let html = '<tr><th>Счёт</th><th class="num">Сумма</th></tr>';
     data.debts.rows.forEach(r => {
       const cls = r.amount_kopecks >= 0 ? 'positive' : 'negative';
-      html += '<tr><td>' + r.account + '</td><td class="num ' + cls + '">' +
-        formatMoney(r.amount_kopecks) + ' ' + r.code + '</td></tr>';
+      html += '<tr><td>' + escapeHtml(r.account) + '</td><td class="num ' + cls + '">' +
+        formatMoney(r.amount_kopecks) + ' ' + escapeHtml(r.code) + '</td></tr>';
     });
     const totalCls = data.debts.total_converted_kopecks >= 0 ? 'positive' : 'negative';
     html += '<tr class="total-row"><td>Итого нетто (≈ ' + sym + ')</td><td class="num ' + totalCls + '">' +
@@ -492,7 +504,7 @@
   }
 
   function renderBudget(data) {
-    const sym = data.display_currency_code || '';
+    const sym = escapeHtml(data.display_currency_code || '');
     document.getElementById('budgetMonthLabel').textContent = 'Бюджет: ' + data.budget.month;
     renderPaceWarnings(data.budget.overspend_warnings || []);
 
@@ -508,7 +520,7 @@
       const detailId = 'paceDetail' + idx;
       const tapAttr = pace ? ' class="' + rowClass.trim() + ' pace-row" onclick="togglePaceDetail(\'' + detailId + '\')"' : ' class="' + rowClass.trim() + '"';
       const paceDot = pace ? '<span class="pace-dot"></span>' : '';
-      html += '<tr' + tapAttr + '><td class="' + nameClass + '">' + r.name + '</td>' +
+      html += '<tr' + tapAttr + '><td class="' + nameClass + '">' + escapeHtml(r.name) + '</td>' +
         '<td class="num">' + formatMoney(r.assigned) + '</td>' +
         '<td class="num">' + formatMoney(r.activity) + '</td>' +
         '<td class="num ' + cls + '">' + formatMoney(r.available) + paceDot + '</td></tr>';
@@ -559,7 +571,7 @@
     }
     const chips = warnings.map(w => {
       const detail = w.kind === 'weekly' ? 'по ' + WEEKDAY_DATIVE_PLURAL[w.weekday] : 'к ' + w.crossing_day + ' числу';
-      return '<span class="pace-chip">' + w.name + ' — ' + detail + '</span>';
+      return '<span class="pace-chip">' + escapeHtml(w.name) + ' — ' + detail + '</span>';
     }).join('');
     box.innerHTML = '<div class="pace-banner-text">На повышенном темпе трат — возможен перерасход:</div>' + chips;
     box.style.display = 'block';
