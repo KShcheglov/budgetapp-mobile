@@ -213,7 +213,7 @@
   <div id="lockScreen" style="display:none">
     <div class="lock-box">
       <div class="lock-icon">🔒</div>
-      <h1>Мой Бюджет <span class="version-tag">v13</span></h1>
+      <h1>Мой Бюджет <span class="version-tag">v14</span></h1>
       <!-- Биометрия - ПЕРВОЙ и заметной кнопкой, не автоматически: у
            WebAuthn нет способа надёжно запросить Face ID/отпечаток без
            настоящего тапа пользователя (проверено на реальных
@@ -231,7 +231,7 @@
   </div>
 
   <div id="setupScreen" style="display:none">
-    <h1>Мой Бюджет — телефон <span class="version-tag">v13</span></h1>
+    <h1>Мой Бюджет — телефон <span class="version-tag">v14</span></h1>
     <p class="muted">
       Первый запуск - вставь Dropbox-ссылку "Поделиться" на файл
       <code>budgetapp_mobile_snapshot.json</code> (создаётся десктопным
@@ -249,13 +249,13 @@
 
   <div id="mainScreen" style="display:none">
     <div style="display:flex; justify-content:space-between; align-items:center">
-      <h1 style="margin:4px 0">Мой Бюджет <span class="version-tag">v13</span></h1>
+      <h1 style="margin:4px 0">Мой Бюджет <span class="version-tag">v14</span></h1>
       <button id="themeToggleBtn" onclick="toggleTheme()" style="width:auto; padding:8px 12px; background:var(--card-bg); color:var(--text); font-size:16px">🌙</button>
     </div>
     <div class="updated" id="updatedLine"></div>
     <div id="errorBox"></div>
 
-    <div class="page active" id="page-money">
+    <div class="page" id="page-money">
       <div class="card">
         <h2 style="margin-top:0; font-size:15px">Остатки денег</h2>
         <table id="moneyTable"></table>
@@ -269,7 +269,7 @@
       </div>
     </div>
 
-    <div class="page" id="page-budget">
+    <div class="page active" id="page-budget">
       <div class="card">
         <h2 style="margin-top:0; font-size:15px" id="budgetMonthLabel">Бюджет</h2>
         <div id="paceWarningBanner" style="display:none"></div>
@@ -289,9 +289,9 @@
   </div>
 
   <div class="tabs" id="tabs" style="display:none">
-    <button class="tab-btn active" data-page="money" onclick="showTab('money')">💰 Деньги</button>
+    <button class="tab-btn" data-page="money" onclick="showTab('money')">💰 Деньги</button>
     <button class="tab-btn" data-page="debts" onclick="showTab('debts')">📋 Долги</button>
-    <button class="tab-btn" data-page="budget" onclick="showTab('budget')">📊 Бюджет</button>
+    <button class="tab-btn active" data-page="budget" onclick="showTab('budget')">📊 Бюджет</button>
   </div>
 
 <script>
@@ -456,6 +456,7 @@
     renderMoney(data);
     renderDebts(data);
     renderBudget(data);
+    showTab('budget'); // и при открытии, и при каждом "Обновить" - бюджет интересен чаще всего, не заставлять переключаться руками
   }
 
   function renderMoney(data) {
