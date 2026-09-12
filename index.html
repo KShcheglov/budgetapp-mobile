@@ -299,7 +299,7 @@
        на bottom:2px метка версии физически рисовалась ПОД её фоном и
        была не видна вообще, независимо от z-index (это про то, ЧТО
        где нарисовано на экране, z-index тут был ни при чём). -->
-  <div style="position:fixed; bottom:46px; right:6px; font-size:11px; color:var(--text-muted); opacity:0.75; z-index:100">v11</div>
+  <div style="position:fixed; bottom:46px; right:6px; font-size:11px; color:var(--text-muted); opacity:0.75; z-index:100">v12</div>
 
 <script>
   const STORAGE_KEY = 'budgetapp_mobile_dropbox_link';
@@ -518,9 +518,7 @@
         '<td class="num ' + cls + '">' + formatMoney(r.available) + paceDot + '</td></tr>';
       if (pace) {
         html += '<tr class="pace-detail-row" id="' + detailId + '" style="display:none"><td colspan="4"><div class="pace-detail">' +
-          'Последние ' + pace.window_days + ' дней: ≈ ' + formatMoney(pace.daily_rate_kopecks) + ' /день<br>' +
-          'При этом темпе: уйдёт в минус ~' + pace.crossing_day + ' числа<br>' +
-          'Ожидаемый перерасход к концу месяца: ' + formatMoney(pace.projected_shortfall_kopecks) +
+          renderPaceDetailHtml(pace) +
           '</div></td></tr>';
       }
     });
@@ -534,6 +532,25 @@
     document.getElementById('budgetTable').innerHTML = html;
   }
 
+  // Два независимых механизма сигнала о перерасходе (см.
+  // backend/budget_engine.py: compute_overspend_pace/compute_weekly_pace) -
+  // "pace" (медиана за последние N дней) и "weekly" (регулярность по дню
+  // недели, например "рестораны по пятницам", которую 7-дневная медиана
+  // структурно не может поймать). Различаются по kind, у каждого свои
+  // поля - см. тот же branching в frontend/js/budget.js.
+  const WEEKDAY_DATIVE_PLURAL = ['понедельникам', 'вторникам', 'средам', 'четвергам', 'пятницам', 'субботам', 'воскресеньям'];
+
+  function renderPaceDetailHtml(pace) {
+    if (pace.kind === 'weekly') {
+      return 'По ' + WEEKDAY_DATIVE_PLURAL[pace.weekday] + ' обычно: ≈ ' + formatMoney(pace.typical_amount_kopecks) + '<br>' +
+        'Ещё повторится до конца месяца: ' + pace.remaining_occurrences + ' раз(а)<br>' +
+        'Ожидаемый перерасход к концу месяца: ' + formatMoney(pace.projected_shortfall_kopecks);
+    }
+    return 'Последние ' + pace.window_days + ' дней: ≈ ' + formatMoney(pace.daily_rate_kopecks) + ' /день<br>' +
+      'При этом темпе: уйдёт в минус ~' + pace.crossing_day + ' числа<br>' +
+      'Ожидаемый перерасход к концу месяца: ' + formatMoney(pace.projected_shortfall_kopecks);
+  }
+
   // Полоска-сводка над таблицей бюджета - тот же смысл, что и
   // #paceWarningStrip в десктопном frontend/js/budget.js, отдельно от
   // errorBox (тот - только про синхронизацию/ошибки загрузки).
@@ -544,9 +561,10 @@
       box.innerHTML = '';
       return;
     }
-    const chips = warnings.map(w =>
-      '<span class="pace-chip">' + w.name + ' — к ' + w.crossing_day + ' числу</span>'
-    ).join('');
+    const chips = warnings.map(w => {
+      const detail = w.kind === 'weekly' ? 'по ' + WEEKDAY_DATIVE_PLURAL[w.weekday] : 'к ' + w.crossing_day + ' числу';
+      return '<span class="pace-chip">' + w.name + ' — ' + detail + '</span>';
+    }).join('');
     box.innerHTML = '<div class="pace-banner-text">На повышенном темпе трат — возможен перерасход:</div>' + chips;
     box.style.display = 'block';
   }
