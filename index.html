@@ -219,7 +219,7 @@
   <div id="lockScreen" style="display:none">
     <div class="lock-box">
       <div class="lock-icon">🔒</div>
-      <h1>Мой Бюджет <span class="version-tag">v16</span></h1>
+      <h1>Мой Бюджет <span class="version-tag"></span></h1>
       <!-- Биометрия - ПЕРВОЙ и заметной кнопкой, не автоматически: у
            WebAuthn нет способа надёжно запросить Face ID/отпечаток без
            настоящего тапа пользователя (проверено на реальных
@@ -237,7 +237,7 @@
   </div>
 
   <div id="setupScreen" style="display:none">
-    <h1>Мой Бюджет — телефон <span class="version-tag">v18</span></h1>
+    <h1>Мой Бюджет — телефон <span class="version-tag"></span></h1>
     <p class="muted">
       Первый запуск - вставь Dropbox-ссылку "Поделиться" на файл
       <code>budgetapp_mobile_snapshot.json</code> (создаётся десктопным
@@ -257,7 +257,7 @@
 
   <div id="mainScreen" style="display:none">
     <div style="display:flex; justify-content:space-between; align-items:center">
-      <h1 style="margin:4px 0">Мой Бюджет <span class="version-tag">v18</span></h1>
+      <h1 style="margin:4px 0">Мой Бюджет <span class="version-tag"></span></h1>
       <button id="themeToggleBtn" onclick="toggleTheme()" style="width:auto; padding:8px 12px; background:var(--card-bg); color:var(--text); font-size:16px">🌙</button>
     </div>
     <div class="updated" id="updatedLine"></div>
@@ -304,6 +304,12 @@
   </div>
 
 <script>
+  // Номер версии - ОДИН раз здесь (и в CACHE_NAME в sw.js), все метки на
+  // экранах заполняются из него: раньше он был вписан в три заголовка
+  // вручную, и на экране PIN так и остался v16, когда остальные уже были v18.
+  const APP_VERSION = 'v19';
+  document.querySelectorAll('.version-tag').forEach((el) => { el.textContent = APP_VERSION; });
+
   const STORAGE_KEY = 'budgetapp_mobile_dropbox_link';
   const THEME_KEY = 'budgetapp_mobile_theme';
   const PIN_SALT_KEY = 'budgetapp_mobile_pin_salt';

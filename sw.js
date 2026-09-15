@@ -1,24 +1,32 @@
 // Service worker для мобильной страницы-просмотрщика бюджета.
-// Два кэша с разными стратегиями:
-// 1. CACHE_NAME - статика самого приложения (index.html, manifest,
-//    иконки): кэш в приоритете, сеть как запасной вариант (быстрый
-//    запуск, работает без связи вообще). Имя меняется с каждой версией,
-//    старая статика удаляется при активации.
-// 2. SNAPSHOT_CACHE - только ПОСЛЕДНИЙ удачно загруженный снимок данных:
+// Три стратегии:
+// 1. Сама страница (переход на неё, index.html) - СЕТЬ в приоритете, с
+//    проверкой свежести у сервера (cache: 'no-cache' - если файл не
+//    менялся, сервер отвечает коротким 304). Без сети - копия из кэша.
+//    Раньше страница бралась из кэша в первую очередь, и новая версия
+//    доходила до телефона только через смену CACHE_NAME ниже. Хуже того:
+//    при установке новой версии cache.addAll брал index.html из обычного
+//    HTTP-кэша браузера (GitHub Pages отдаёт max-age=600), и если две
+//    версии выходили с разницей меньше 10 минут, в кэш новой версии
+//    ложилась старая страница - телефон застревал на ней до следующей
+//    версии (так и случилось с v17/v18).
+// 2. Остальная статика (manifest, иконки) - кэш в приоритете, сеть как
+//    запасной вариант. При установке всё качается мимо HTTP-кэша
+//    (cache: 'reload').
+// 3. SNAPSHOT_CACHE - только ПОСЛЕДНИЙ удачно загруженный снимок данных:
 //    сеть в приоритете (свежие цифры, когда связь есть), без сети - этот
-//    снимок со старой пометкой "Обновлено...". Раньше в общий кэш ложился
-//    любой ответ с чужого адреса, включая ошибки, и снимки по старым
-//    ссылкам так и оставались в памяти телефона. Теперь хранится один
-//    снимок, а страница очищает этот кэш при смене ссылки (saveLink в
-//    index.html).
+//    снимок со старой пометкой "Обновлено...". Страница очищает этот кэш
+//    при смене ссылки (saveLink в index.html).
 
-const CACHE_NAME = 'budgetapp-mobile-v18';
+const CACHE_NAME = 'budgetapp-mobile-v19'; // тот же номер - APP_VERSION в index.html
 const SNAPSHOT_CACHE = 'budgetapp-snapshot'; // то же имя - в index.html
 const APP_SHELL = ['./', './index.html', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(CACHE_NAME).then((cache) =>
+      cache.addAll(APP_SHELL.map((url) => new Request(url, { cache: 'reload' })))
+    )
   );
   self.skipWaiting();
 });
@@ -38,13 +46,32 @@ async function saveSnapshot(req, resp) {
   await cache.put(req, resp);
 }
 
+function pageFromNetworkFirst(req) {
+  return fetch(req, { cache: 'no-cache' })
+    .then((resp) => {
+      if (resp.ok) {
+        const copy = resp.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+      }
+      return resp;
+    })
+    .catch(() =>
+      caches.match(req, { ignoreSearch: true }).then((cached) => cached || caches.match('./index.html'))
+    );
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
 
-  const isAppShell = new URL(req.url).origin === self.location.origin;
+  const isSameOrigin = new URL(req.url).origin === self.location.origin;
 
-  if (isAppShell) {
+  if (isSameOrigin && req.mode === 'navigate') {
+    event.respondWith(pageFromNetworkFirst(req));
+    return;
+  }
+
+  if (isSameOrigin) {
     event.respondWith(caches.match(req).then((cached) => cached || fetch(req)));
     return;
   }
