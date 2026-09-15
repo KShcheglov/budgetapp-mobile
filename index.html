@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Мой Бюджет — телефон</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
@@ -135,7 +135,10 @@
     background: var(--card-bg);
     color: var(--text);
   }
-  input { width: 100%; margin-bottom: 8px; }
+  /* 16px, а не 15: при меньшем шрифте iOS приближает страницу при фокусе
+     на поле. Раньше это гасил maximum-scale=1 в viewport, но он же не давал
+     увеличить страницу пальцами. */
+  input { width: 100%; margin-bottom: 8px; font-size: 16px; }
   button { background: var(--accent); color: #10131a; border: none; font-weight: 600; }
   .tabs {
     position: fixed; bottom: 0; left: 0; right: 0;
@@ -206,6 +209,9 @@
      "Мой Бюджет" на всех трёх экранах (замок/настройка/основной),
      чтобы быть видно сразу, а не искать метку в углу экрана. */
   .version-tag { font-size: 11px; font-weight: normal; color: var(--text-muted); opacity: 0.75; }
+  /* Итог месяца сразу под заголовком: без него он был только в последней
+     строке длинной таблицы. */
+  .budget-summary { font-size: 13px; color: var(--text-muted); margin: -4px 0 10px; }
 </style>
 </head>
 <body>
@@ -231,7 +237,7 @@
   </div>
 
   <div id="setupScreen" style="display:none">
-    <h1>Мой Бюджет — телефон <span class="version-tag">v16</span></h1>
+    <h1>Мой Бюджет — телефон <span class="version-tag">v17</span></h1>
     <p class="muted">
       Первый запуск - вставь Dropbox-ссылку "Поделиться" на файл
       <code>budgetapp_mobile_snapshot.json</code> (создаётся десктопным
@@ -240,7 +246,9 @@
     <p style="color:var(--danger); font-size:13px">
       Внимание: у кого угодно с этой ссылкой будет доступ к твоим остаткам
       и долгам без пароля (если не включена защита паролем на стороне
-      Dropbox). Не пересылай её в открытых чатах.
+      Dropbox). Не пересылай её в открытых чатах. Если ссылка могла попасть
+      к кому-то ещё - удали её в Dropbox (Поделиться → настройки ссылки),
+      создай новую и вставь сюда.
     </p>
     <input type="text" id="linkInput" placeholder="https://www.dropbox.com/scl/fi/.../budgetapp_mobile_snapshot.json?...">
     <button onclick="saveLink()">Сохранить и загрузить</button>
@@ -249,7 +257,7 @@
 
   <div id="mainScreen" style="display:none">
     <div style="display:flex; justify-content:space-between; align-items:center">
-      <h1 style="margin:4px 0">Мой Бюджет <span class="version-tag">v16</span></h1>
+      <h1 style="margin:4px 0">Мой Бюджет <span class="version-tag">v17</span></h1>
       <button id="themeToggleBtn" onclick="toggleTheme()" style="width:auto; padding:8px 12px; background:var(--card-bg); color:var(--text); font-size:16px">🌙</button>
     </div>
     <div class="updated" id="updatedLine"></div>
@@ -272,6 +280,7 @@
     <div class="page active" id="page-budget">
       <div class="card">
         <h2 style="margin-top:0; font-size:15px" id="budgetMonthLabel">Бюджет</h2>
+        <div class="budget-summary" id="budgetSummary"></div>
         <div id="paceWarningBanner" style="display:none"></div>
         <div class="table-wrapper">
           <table id="budgetTable"></table>
@@ -300,6 +309,9 @@
   const PIN_SALT_KEY = 'budgetapp_mobile_pin_salt';
   const PIN_HASH_KEY = 'budgetapp_mobile_pin_hash';
   const BIOMETRIC_KEY = 'budgetapp_mobile_biometric_cred_id';
+  const PIN_FAILS_KEY = 'budgetapp_mobile_pin_fails';
+  const PIN_LOCKED_UNTIL_KEY = 'budgetapp_mobile_pin_locked_until';
+  const SNAPSHOT_CACHE = 'budgetapp-snapshot'; // то же имя - в sw.js
   let appUnlocked = false; // только в памяти - НЕ localStorage, иначе "разблокировано" пережило бы закрытие вкладки
   let swRegistration = null; // см. регистрацию service worker в конце файла - используется для принудительной проверки обновления при каждом "Обновить", не только при открытии
 
@@ -388,8 +400,11 @@
   function saveLink() {
     const link = document.getElementById('linkInput').value.trim();
     if (!link) return;
+    // Снимок по прежней ссылке не должен оставаться в памяти телефона (см. sw.js).
+    const changed = link !== localStorage.getItem(STORAGE_KEY);
+    const cleared = changed && window.caches ? caches.delete(SNAPSHOT_CACHE).catch(() => {}) : Promise.resolve();
     localStorage.setItem(STORAGE_KEY, link);
-    loadSnapshot();
+    cleared.then(loadSnapshot);
   }
 
   function showTab(name) {
@@ -532,6 +547,9 @@
     });
     const t = data.budget.totals;
     const totalCls = t.available >= 0 ? 'positive' : 'negative';
+    document.getElementById('budgetSummary').innerHTML =
+      'План ' + formatMoney(t.assigned) + ' · Факт ' + formatMoney(t.activity) +
+      ' · Остаток <span class="' + totalCls + '">' + formatMoney(t.available) + '</span> ' + sym;
     html += '<tr class="total-row"><td>Итого (' + sym + ')</td>' +
       '<td class="num">' + formatMoney(t.assigned) + '</td>' +
       '<td class="num">' + formatMoney(t.activity) + '</td>' +
@@ -669,6 +687,7 @@
   function unlockAndProceed() {
     if (appUnlocked) return; // уже разблокировано другим путём (PIN и биометрия почти одновременно) - не грузить снимок дважды
     appUnlocked = true;
+    resetPinFailures();
     document.getElementById('lockScreen').style.display = 'none';
     proceedToApp();
   }
@@ -684,16 +703,38 @@
     }
   }
 
+  // Пауза после неверных PIN: первые 3 ошибки - без неё (опечатки), дальше
+  // 5, 10, 20, 40, затем 60 секунд. Хранится в localStorage - перезагрузка
+  // страницы паузу не сбрасывает. Перебрать 4 цифры вручную так уже не выйдет.
+  // Более стойкий хэш PIN (PBKDF2) смысла не имеет: ссылка на снимок лежит в
+  // том же localStorage открытым текстом.
+  function pinDelaySeconds(fails) {
+    return fails < 3 ? 0 : Math.min(60, 5 * Math.pow(2, fails - 3));
+  }
+  function resetPinFailures() {
+    localStorage.removeItem(PIN_FAILS_KEY);
+    localStorage.removeItem(PIN_LOCKED_UNTIL_KEY);
+  }
+
   async function handlePinSubmit() {
     const pin = document.getElementById('pinInput').value.trim();
     const errorEl = document.getElementById('pinError');
     if (!pin) { errorEl.textContent = 'Введи PIN-код.'; return; }
+    const waitMs = Number(localStorage.getItem(PIN_LOCKED_UNTIL_KEY) || 0) - Date.now();
+    if (waitMs > 0) {
+      errorEl.textContent = 'Слишком много попыток - подожди ' + Math.ceil(waitMs / 1000) + ' с.';
+      return;
+    }
     const salt = localStorage.getItem(PIN_SALT_KEY) || '';
     const hash = await hashPin(pin, salt);
     if (hash === localStorage.getItem(PIN_HASH_KEY)) {
       unlockAndProceed();
     } else {
-      errorEl.textContent = 'Неверный PIN.';
+      const fails = Number(localStorage.getItem(PIN_FAILS_KEY) || 0) + 1;
+      localStorage.setItem(PIN_FAILS_KEY, String(fails));
+      const delay = pinDelaySeconds(fails);
+      if (delay) localStorage.setItem(PIN_LOCKED_UNTIL_KEY, String(Date.now() + delay * 1000));
+      errorEl.textContent = delay ? 'Неверный PIN. Следующая попытка через ' + delay + ' с.' : 'Неверный PIN.';
       document.getElementById('pinInput').value = '';
     }
   }
@@ -765,6 +806,7 @@
     localStorage.removeItem(PIN_HASH_KEY);
     localStorage.removeItem(PIN_SALT_KEY);
     localStorage.removeItem(BIOMETRIC_KEY);
+    resetPinFailures();
     renderLockSettings();
   }
 
