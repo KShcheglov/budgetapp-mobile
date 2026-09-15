@@ -237,7 +237,7 @@
   </div>
 
   <div id="setupScreen" style="display:none">
-    <h1>Мой Бюджет — телефон <span class="version-tag">v17</span></h1>
+    <h1>Мой Бюджет — телефон <span class="version-tag">v18</span></h1>
     <p class="muted">
       Первый запуск - вставь Dropbox-ссылку "Поделиться" на файл
       <code>budgetapp_mobile_snapshot.json</code> (создаётся десктопным
@@ -257,7 +257,7 @@
 
   <div id="mainScreen" style="display:none">
     <div style="display:flex; justify-content:space-between; align-items:center">
-      <h1 style="margin:4px 0">Мой Бюджет <span class="version-tag">v17</span></h1>
+      <h1 style="margin:4px 0">Мой Бюджет <span class="version-tag">v18</span></h1>
       <button id="themeToggleBtn" onclick="toggleTheme()" style="width:auto; padding:8px 12px; background:var(--card-bg); color:var(--text); font-size:16px">🌙</button>
     </div>
     <div class="updated" id="updatedLine"></div>
@@ -547,9 +547,15 @@
     });
     const t = data.budget.totals;
     const totalCls = t.available >= 0 ? 'positive' : 'negative';
+    // В сводке - итог именно этого месяца, План − Факт, как "Экономия"/
+    // "Перерасход" в шапке месяца на десктопе (frontend/js/budget.js).
+    // Накопленный остаток с переносом прошлых месяцев - в колонке и
+    // строке "Итого" таблицы ниже.
+    const saving = t.assigned - t.activity;
     document.getElementById('budgetSummary').innerHTML =
-      'План ' + formatMoney(t.assigned) + ' · Факт ' + formatMoney(t.activity) +
-      ' · Остаток <span class="' + totalCls + '">' + formatMoney(t.available) + '</span> ' + sym;
+      'План ' + formatMoney(t.assigned) + ' · Факт ' + formatMoney(t.activity) + ' · ' +
+      '<span class="' + (saving >= 0 ? 'positive' : 'negative') + '">' +
+      (saving >= 0 ? 'Экономия ' : 'Перерасход ') + formatMoney(Math.abs(saving)) + '</span> ' + sym;
     html += '<tr class="total-row"><td>Итого (' + sym + ')</td>' +
       '<td class="num">' + formatMoney(t.assigned) + '</td>' +
       '<td class="num">' + formatMoney(t.activity) + '</td>' +

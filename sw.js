@@ -12,7 +12,7 @@
 //    снимок, а страница очищает этот кэш при смене ссылки (saveLink в
 //    index.html).
 
-const CACHE_NAME = 'budgetapp-mobile-v17';
+const CACHE_NAME = 'budgetapp-mobile-v18';
 const SNAPSHOT_CACHE = 'budgetapp-snapshot'; // то же имя - в index.html
 const APP_SHELL = ['./', './index.html', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
 
