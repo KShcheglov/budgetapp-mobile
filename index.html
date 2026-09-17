@@ -307,7 +307,7 @@
   // Номер версии - ОДИН раз здесь (и в CACHE_NAME в sw.js), все метки на
   // экранах заполняются из него: раньше он был вписан в три заголовка
   // вручную, и на экране PIN так и остался v16, когда остальные уже были v18.
-  const APP_VERSION = 'v21';
+  const APP_VERSION = 'v22';
   document.querySelectorAll('.version-tag').forEach((el) => { el.textContent = APP_VERSION; });
 
   const STORAGE_KEY = 'budgetapp_mobile_dropbox_link';
@@ -735,6 +735,11 @@
   function unlockAndProceed() {
     if (appUnlocked) return; // уже разблокировано другим путём (PIN и биометрия почти одновременно) - не грузить снимок дважды
     appUnlocked = true;
+    // Разблокировали, а автозапрос биометрии всё ещё висит - значит, его
+    // окно так и не появилось (системное окно закрывает экран, PIN при нём
+    // не ввести). На этом телефоне больше не запрашиваем сам: висящий запрос
+    // занимает и кнопку, и включение отпечатка в настройках.
+    if (biometricRequest && biometricRequest.auto) localStorage.setItem(BIOMETRIC_AUTO_OFF_KEY, '1');
     resetPinFailures();
     document.getElementById('lockScreen').style.display = 'none';
     proceedToApp();
@@ -870,13 +875,23 @@
     localStorage.removeItem(PIN_HASH_KEY);
     localStorage.removeItem(PIN_SALT_KEY);
     localStorage.removeItem(BIOMETRIC_KEY);
-    localStorage.removeItem(BIOMETRIC_AUTO_OFF_KEY);
     resetPinFailures();
     renderLockSettings();
   }
 
+  const HUNG_BIOMETRIC_HINT = 'Запрос отпечатка, начатый при открытии, завис в системе и не даёт начать новый. ' +
+    'Закрой приложение полностью (смахни из недавних), открой заново и включи ещё раз - ' +
+    'сам при открытии этот телефон отпечаток больше не запросит. Не помогло - перезагрузи телефон.';
+
   async function setupBiometric() {
     const msg = document.getElementById('lockSettingsMsg');
+    // Висящий автозапрос отменить нельзя (на Android отмена до системы не
+    // доходит) - create() гарантированно получил бы "already pending".
+    if (biometricRequest && biometricRequest.auto) {
+      localStorage.setItem(BIOMETRIC_AUTO_OFF_KEY, '1');
+      msg.textContent = HUNG_BIOMETRIC_HINT;
+      return;
+    }
     try {
       const challenge = crypto.getRandomValues(new Uint8Array(32));
       const userId = crypto.getRandomValues(new Uint8Array(16));
@@ -893,13 +908,20 @@
       localStorage.setItem(BIOMETRIC_KEY, idB64);
       renderLockSettings();
     } catch (e) {
-      msg.textContent = 'Не удалось включить: ' + e.message;
+      if (e && e.name === 'OperationError') {
+        localStorage.setItem(BIOMETRIC_AUTO_OFF_KEY, '1');
+        msg.textContent = HUNG_BIOMETRIC_HINT;
+      } else {
+        msg.textContent = 'Не удалось включить: ' + e.message;
+      }
     }
   }
 
+  // BIOMETRIC_AUTO_OFF_KEY при отключении не сбрасываем (и в disableLock
+  // тоже): зависание автозапроса - свойство телефона, а не настройка
+  // отпечатка, и после повторного включения оно вернулось бы.
   function disableBiometric() {
     localStorage.removeItem(BIOMETRIC_KEY);
-    localStorage.removeItem(BIOMETRIC_AUTO_OFF_KEY);
     renderLockSettings();
   }
 
