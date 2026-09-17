@@ -307,7 +307,7 @@
   // Номер версии - ОДИН раз здесь (и в CACHE_NAME в sw.js), все метки на
   // экранах заполняются из него: раньше он был вписан в три заголовка
   // вручную, и на экране PIN так и остался v16, когда остальные уже были v18.
-  const APP_VERSION = 'v23';
+  const APP_VERSION = 'v24';
   document.querySelectorAll('.version-tag').forEach((el) => { el.textContent = APP_VERSION; });
 
   const STORAGE_KEY = 'budgetapp_mobile_dropbox_link';
@@ -319,6 +319,15 @@
   const PIN_FAILS_KEY = 'budgetapp_mobile_pin_fails';
   const PIN_LOCKED_UNTIL_KEY = 'budgetapp_mobile_pin_locked_until';
   const SNAPSHOT_CACHE = 'budgetapp-snapshot'; // то же имя - в sw.js
+
+  // Однократно с v24: автозапрос отпечатка при открытии на OnePlus
+  // отключился сам (v21-v22) из-за зависавшего запроса без transports (см.
+  // tryBiometricUnlock) - после исправления возвращаем его. Если на
+  // каком-то телефоне он всё же зависнет, та же защита отключит его снова.
+  if (!localStorage.getItem('budgetapp_mobile_biometric_auto_reset_v24')) {
+    localStorage.removeItem(BIOMETRIC_AUTO_OFF_KEY);
+    localStorage.setItem('budgetapp_mobile_biometric_auto_reset_v24', '1');
+  }
   let appUnlocked = false; // только в памяти - НЕ localStorage, иначе "разблокировано" пережило бы закрытие вкладки
   let swRegistration = null; // см. регистрацию service worker в конце файла - используется для принудительной проверки обновления при каждом "Обновить", не только при открытии
 
@@ -671,8 +680,13 @@
     try {
       const rawId = Uint8Array.from(atob(idB64), c => c.charCodeAt(0));
       const challenge = crypto.getRandomValues(new Uint8Array(32));
+      // transports: ['internal'] - ключ лежит на этом телефоне (создан с
+      // authenticatorAttachment: 'platform'). Без этого указания Chrome на
+      // OnePlus отправлял запрос другим путём, и он зависал без окна - даже
+      // по нажатию, хотя регистрация проходила (выяснено страницей
+      // biometric-test.html: варианты с transports сработали, без - нет).
       const done = navigator.credentials.get({
-        publicKey: { challenge, allowCredentials: [{ id: rawId, type: 'public-key' }], userVerification: 'required', timeout: auto ? 30000 : 60000 },
+        publicKey: { challenge, allowCredentials: [{ id: rawId, type: 'public-key', transports: ['internal'] }], userVerification: 'required', timeout: auto ? 30000 : 60000 },
         signal: controller.signal,
       });
       biometricRequest = { controller, done, auto: !!auto };
