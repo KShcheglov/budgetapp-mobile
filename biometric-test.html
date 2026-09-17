@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Мой Бюджет — проверка отпечатка</title>
+<!--
+  Диагностика входа по отпечатку (WebAuthn). На OnePlus вход завис без окна
+  даже по нажатию, хотя регистрация отпечатка (create) проходит штатно, а на
+  Samsung всё работает. Страница пробует варианты запроса и записывает ответ
+  системы - по результату в приложение переносится рабочий вариант, а не
+  догадка, которая могла бы сломать вход там, где он работает.
+
+  Ничего не сохраняет, кроме своего журнала (localStorage, тот же сайт), и
+  ничего не меняет в настройках приложения. Ключ берёт тот же, что
+  приложение (budgetapp_mobile_biometric_cred_id).
+-->
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; background: #10131a; color: #e6e8ee; margin: 0; padding: 16px; }
+  h1 { color: #1f9d63; font-size: 18px; margin: 4px 0 12px; }
+  p { font-size: 14px; color: #9aa3b2; line-height: 1.45; margin: 8px 0; }
+  b { color: #e6e8ee; }
+  button { display: block; width: 100%; margin: 8px 0; padding: 12px; font-size: 16px; border: none;
+           border-radius: 8px; background: #1f9d63; color: #10131a; font-weight: 600; text-align: left; }
+  button.secondary { background: #2a3040; color: #e6e8ee; }
+  .row { display: flex; gap: 8px; }
+  .row button { text-align: center; }
+  textarea { width: 100%; box-sizing: border-box; height: 280px; font: 12px/1.4 monospace; background: #1a1f2b;
+             color: #e6e8ee; border: 1px solid #2a3040; border-radius: 8px; padding: 8px; }
+  a { color: #1f9d63; }
+</style>
+</head>
+<body>
+<h1>Проверка отпечатка</h1>
+<p>Страница пробует разные варианты запроса отпечатка и записывает, что ответила система. Настройки приложения не меняются.</p>
+<p><b>Порядок.</b> Нажми вариант и подожди 15 секунд. Появилось окно отпечатка — приложи палец. Окна нет — закрой приложение полностью (смахни из недавних), открой эту страницу снова и попробуй следующий вариант: зависший запрос не даст проверить остальные. Журнал ниже сохраняется между перезапусками — в конце скопируй его и пришли.</p>
+
+<button onclick="run('A')">A. Как в приложении сейчас</button>
+<button onclick="run('B')">B. Только отпечаток этого телефона (transports)</button>
+<button onclick="run('C')">C. Вариант B + подсказка браузеру (hints)</button>
+<button class="secondary" onclick="run('D')">D. Без указания ключа</button>
+
+<div class="row">
+  <button class="secondary" onclick="copyLog()">Скопировать журнал</button>
+  <button class="secondary" onclick="clearLog()">Очистить</button>
+</div>
+<textarea id="log" readonly></textarea>
+<p><a href="./">← вернуться в приложение</a></p>
+
+<script>
+  const CRED_KEY = 'budgetapp_mobile_biometric_cred_id'; // тот же ключ, что в index.html
+  const LOG_KEY = 'budgetapp_mobile_biometric_test_log';
+  const logEl = document.getElementById('log');
+  logEl.value = localStorage.getItem(LOG_KEY) || '';
+  let pending = false;
+
+  function log(line) {
+    logEl.value += '[' + new Date().toLocaleTimeString('ru-RU') + '] ' + line + '\n';
+    localStorage.setItem(LOG_KEY, logEl.value);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  async function run(variant) {
+    if (pending) {
+      log(variant + ': предыдущий запрос ещё не завершён - закрой страницу полностью и открой снова');
+      return;
+    }
+    const idB64 = localStorage.getItem(CRED_KEY);
+    if (variant !== 'D' && !idB64) {
+      log(variant + ': в приложении не включён вход по отпечатку - включи его в «защита входа»');
+      return;
+    }
+    const publicKey = { challenge: crypto.getRandomValues(new Uint8Array(32)), userVerification: 'required', timeout: 60000 };
+    if (variant !== 'D') {
+      const descriptor = { id: Uint8Array.from(atob(idB64), c => c.charCodeAt(0)), type: 'public-key' };
+      if (variant === 'B' || variant === 'C') descriptor.transports = ['internal'];
+      publicKey.allowCredentials = [descriptor];
+    }
+    if (variant === 'C') publicKey.hints = ['client-device'];
+
+    pending = true;
+    const t0 = performance.now();
+    log(variant + ': запрос отправлен');
+    const watchdog = setTimeout(() => log(variant + ': 15 с без ответа - окно не появилось?'), 15000);
+    try {
+      await navigator.credentials.get({ publicKey });
+      log(variant + ': УСПЕХ за ' + Math.round(performance.now() - t0) + ' мс');
+    } catch (e) {
+      log(variant + ': ошибка через ' + Math.round(performance.now() - t0) + ' мс - ' + e.name + ': ' + e.message);
+    } finally {
+      clearTimeout(watchdog);
+      pending = false;
+    }
+  }
+
+  function copyLog() {
+    navigator.clipboard.writeText(logEl.value)
+      .then(() => alert('Журнал скопирован'))
+      .catch(() => { logEl.focus(); logEl.select(); alert('Не удалось скопировать - текст выделен, скопируй вручную'); });
+  }
+
+  function clearLog() {
+    localStorage.removeItem(LOG_KEY);
+    logEl.value = '';
+  }
+
+  (async () => {
+    const standalone = window.matchMedia('(display-mode: standalone)').matches;
+    let uvpaa = 'нет API';
+    let caps = 'нет API';
+    try {
+      if (window.PublicKeyCredential) uvpaa = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+    } catch (e) { uvpaa = e.name; }
+    try {
+      if (window.PublicKeyCredential && PublicKeyCredential.getClientCapabilities) {
+        caps = JSON.stringify(await PublicKeyCredential.getClientCapabilities());
+      }
+    } catch (e) { caps = e.name; }
+    log('--- страница открыта ' + (standalone ? 'как приложение' : 'во вкладке браузера') + '; ' + navigator.userAgent);
+    log('отпечаток на устройстве: ' + uvpaa + '; ключ приложения есть: ' + !!localStorage.getItem(CRED_KEY) + '; возможности: ' + caps);
+  })();
+</script>
+</body>
+</html>

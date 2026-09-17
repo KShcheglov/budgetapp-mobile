@@ -307,7 +307,7 @@
   // Номер версии - ОДИН раз здесь (и в CACHE_NAME в sw.js), все метки на
   // экранах заполняются из него: раньше он был вписан в три заголовка
   // вручную, и на экране PIN так и остался v16, когда остальные уже были v18.
-  const APP_VERSION = 'v22';
+  const APP_VERSION = 'v23';
   document.querySelectorAll('.version-tag').forEach((el) => { el.textContent = APP_VERSION; });
 
   const STORAGE_KEY = 'budgetapp_mobile_dropbox_link';
@@ -745,11 +745,28 @@
     proceedToApp();
   }
 
+  const HUNG_TAP_HINT = 'Окно отпечатка так и не появилось - запрос завис в системе. Войди по PIN; ' +
+    'кнопка снова заработает после полного перезапуска приложения (смахни из недавних). ' +
+    'Выяснить причину - «защита входа» → «проверка».';
+
   async function handleBiometricUnlockTap() {
     const errorEl = document.getElementById('pinError');
+    // Предыдущее нажатие ещё ждёт окна: новый запрос система всё равно
+    // отклонит ("already pending"), а отменить висящий на Android нельзя.
+    if (biometricRequest && !biometricRequest.auto) {
+      errorEl.textContent = HUNG_TAP_HINT;
+      return;
+    }
     errorEl.textContent = '';
     const autoWasPending = !!(biometricRequest && biometricRequest.auto);
+    // Окно отпечатка появляется за доли секунды. Нет ни окна, ни ответа за
+    // 8 секунд - запрос завис (так на OnePlus в v22); говорим об этом сразу,
+    // а не молчим до таймаута.
+    const hungTimer = setTimeout(() => {
+      if (biometricRequest && !biometricRequest.auto) errorEl.textContent = HUNG_TAP_HINT;
+    }, 8000);
     const result = await tryBiometricUnlock(false); // висящий автоматический запрос отменяется внутри
+    clearTimeout(hungTimer);
     if (result.ok) {
       unlockAndProceed();
     } else if (autoWasPending && result.name === 'OperationError') {
@@ -850,6 +867,8 @@
             '<span onclick="toggleBiometricAuto()" class="link-action ' +
             (autoOn ? 'negative">выключить' : 'positive">включить') + '</span></div>';
         }
+        html += '<div class="lock-settings-row"><span>Отпечаток не срабатывает?</span>' +
+          '<a href="biometric-test.html" class="link-action">проверка</a></div>';
       }
       html += '<div class="lock-error" id="lockSettingsMsg"></div>';
     }
