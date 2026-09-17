@@ -307,7 +307,7 @@
   // Номер версии - ОДИН раз здесь (и в CACHE_NAME в sw.js), все метки на
   // экранах заполняются из него: раньше он был вписан в три заголовка
   // вручную, и на экране PIN так и остался v16, когда остальные уже были v18.
-  const APP_VERSION = 'v20';
+  const APP_VERSION = 'v21';
   document.querySelectorAll('.version-tag').forEach((el) => { el.textContent = APP_VERSION; });
 
   const STORAGE_KEY = 'budgetapp_mobile_dropbox_link';
@@ -315,6 +315,7 @@
   const PIN_SALT_KEY = 'budgetapp_mobile_pin_salt';
   const PIN_HASH_KEY = 'budgetapp_mobile_pin_hash';
   const BIOMETRIC_KEY = 'budgetapp_mobile_biometric_cred_id';
+  const BIOMETRIC_AUTO_OFF_KEY = 'budgetapp_mobile_biometric_auto_off';
   const PIN_FAILS_KEY = 'budgetapp_mobile_pin_fails';
   const PIN_LOCKED_UNTIL_KEY = 'budgetapp_mobile_pin_locked_until';
   const SNAPSHOT_CACHE = 'budgetapp-snapshot'; // то же имя - в sw.js
@@ -657,24 +658,29 @@
     await Promise.race([pending.done.catch(() => {}), new Promise(r => setTimeout(r, 1000))]);
   }
 
-  // -> {ok: true} или {ok: false, error: 'NotAllowedError: ...'}
-  async function tryBiometricUnlock() {
+  // auto - запрос сам при открытии, без нажатия. Ему короче таймаут: на
+  // Android отмена (abort) до системного сервиса не доходит, и зависший
+  // автозапрос держит кнопку занятой до своего таймаута ("A request is
+  // already pending" - так было на OnePlus в v20).
+  // -> {ok: true} или {ok: false, name: 'NotAllowedError', error: 'NotAllowedError: ...'}
+  async function tryBiometricUnlock(auto) {
     const idB64 = localStorage.getItem(BIOMETRIC_KEY);
-    if (!idB64 || !window.PublicKeyCredential) return { ok: false, error: 'биометрия не настроена' };
+    if (!idB64 || !window.PublicKeyCredential) return { ok: false, name: '', error: 'биометрия не настроена' };
     await cancelBiometricRequest();
     const controller = new AbortController();
     try {
       const rawId = Uint8Array.from(atob(idB64), c => c.charCodeAt(0));
       const challenge = crypto.getRandomValues(new Uint8Array(32));
       const done = navigator.credentials.get({
-        publicKey: { challenge, allowCredentials: [{ id: rawId, type: 'public-key' }], userVerification: 'required', timeout: 60000 },
+        publicKey: { challenge, allowCredentials: [{ id: rawId, type: 'public-key' }], userVerification: 'required', timeout: auto ? 30000 : 60000 },
         signal: controller.signal,
       });
-      biometricRequest = { controller, done };
+      biometricRequest = { controller, done, auto: !!auto };
       await done;
       return { ok: true };
     } catch (e) {
-      return { ok: false, error: e && e.name ? e.name + (e.message ? ': ' + e.message : '') : String(e) };
+      const name = (e && e.name) || '';
+      return { ok: false, name, error: name ? name + (e.message ? ': ' + e.message : '') : String(e) };
     } finally {
       if (biometricRequest && biometricRequest.controller === controller) biometricRequest = null;
     }
@@ -708,10 +714,13 @@
     const biometricReady = !!(localStorage.getItem(BIOMETRIC_KEY) && window.PublicKeyCredential);
     document.getElementById('biometricUnlockBtn').style.display = biometricReady ? 'block' : 'none';
     setTimeout(() => document.getElementById('pinInput').focus(), 50);
-    // Автозапуск - только если запрос уже не идёт: visibilitychange вызывает
-    // showLockScreen повторно, например когда закрывается системное окно.
-    if (biometricReady && !biometricRequest) {
-      tryBiometricUnlock().then(r => { if (r.ok) unlockAndProceed(); });
+    // Автозапуск - только если запрос уже не идёт (visibilitychange вызывает
+    // showLockScreen повторно, например когда закрывается системное окно) и
+    // если на этом телефоне он не отключён - вручную в "защита входа" или
+    // сам, после того как завис и заблокировал кнопку (см.
+    // handleBiometricUnlockTap).
+    if (biometricReady && !biometricRequest && !localStorage.getItem(BIOMETRIC_AUTO_OFF_KEY)) {
+      tryBiometricUnlock(true).then(r => { if (r.ok) unlockAndProceed(); });
     }
   }
 
@@ -734,9 +743,18 @@
   async function handleBiometricUnlockTap() {
     const errorEl = document.getElementById('pinError');
     errorEl.textContent = '';
-    const result = await tryBiometricUnlock(); // висящий автоматический запрос отменяется внутри
+    const autoWasPending = !!(biometricRequest && biometricRequest.auto);
+    const result = await tryBiometricUnlock(false); // висящий автоматический запрос отменяется внутри
     if (result.ok) {
       unlockAndProceed();
+    } else if (autoWasPending && result.name === 'OperationError') {
+      // Автозапрос при открытии завис, не показав окна, и занял кнопку:
+      // отмена на Android до системы не доходит. Больше на этом телефоне
+      // сам не запрашиваем - кнопка будет работать с первого нажатия.
+      localStorage.setItem(BIOMETRIC_AUTO_OFF_KEY, '1');
+      errorEl.textContent = 'Окно отпечатка при открытии на этом телефоне не появилось и заняло кнопку. ' +
+        'Автозапрос отключён: открой приложение заново через полминуты и нажми кнопку. ' +
+        'Включить обратно - «защита входа».';
     } else {
       // Причина - прямо на экране: иначе на телефоне её не узнать.
       errorEl.textContent = 'Не удалось подтвердить (' + result.error + ') - попробуй PIN.';
@@ -821,6 +839,12 @@
             ? '<span onclick="disableBiometric()" class="link-action negative">отключить</span>'
             : '<span onclick="setupBiometric()" class="link-action positive">включить</span>') +
           '</div>';
+        if (biometricSet) {
+          const autoOn = !localStorage.getItem(BIOMETRIC_AUTO_OFF_KEY);
+          html += '<div class="lock-settings-row"><span>Спрашивать сразу при открытии</span>' +
+            '<span onclick="toggleBiometricAuto()" class="link-action ' +
+            (autoOn ? 'negative">выключить' : 'positive">включить') + '</span></div>';
+        }
       }
       html += '<div class="lock-error" id="lockSettingsMsg"></div>';
     }
@@ -846,6 +870,7 @@
     localStorage.removeItem(PIN_HASH_KEY);
     localStorage.removeItem(PIN_SALT_KEY);
     localStorage.removeItem(BIOMETRIC_KEY);
+    localStorage.removeItem(BIOMETRIC_AUTO_OFF_KEY);
     resetPinFailures();
     renderLockSettings();
   }
@@ -874,6 +899,16 @@
 
   function disableBiometric() {
     localStorage.removeItem(BIOMETRIC_KEY);
+    localStorage.removeItem(BIOMETRIC_AUTO_OFF_KEY);
+    renderLockSettings();
+  }
+
+  function toggleBiometricAuto() {
+    if (localStorage.getItem(BIOMETRIC_AUTO_OFF_KEY)) {
+      localStorage.removeItem(BIOMETRIC_AUTO_OFF_KEY);
+    } else {
+      localStorage.setItem(BIOMETRIC_AUTO_OFF_KEY, '1');
+    }
     renderLockSettings();
   }
 

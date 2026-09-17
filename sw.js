@@ -18,7 +18,7 @@
 //    снимок со старой пометкой "Обновлено...". Страница очищает этот кэш
 //    при смене ссылки (saveLink в index.html).
 
-const CACHE_NAME = 'budgetapp-mobile-v20'; // тот же номер - APP_VERSION в index.html
+const CACHE_NAME = 'budgetapp-mobile-v21'; // тот же номер - APP_VERSION в index.html
 const SNAPSHOT_CACHE = 'budgetapp-snapshot'; // то же имя - в index.html
 const APP_SHELL = ['./', './index.html', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
 
