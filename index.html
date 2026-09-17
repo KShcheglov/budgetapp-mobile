@@ -307,7 +307,7 @@
   // Номер версии - ОДИН раз здесь (и в CACHE_NAME в sw.js), все метки на
   // экранах заполняются из него: раньше он был вписан в три заголовка
   // вручную, и на экране PIN так и остался v16, когда остальные уже были v18.
-  const APP_VERSION = 'v19';
+  const APP_VERSION = 'v20';
   document.querySelectorAll('.version-tag').forEach((el) => { el.textContent = APP_VERSION; });
 
   const STORAGE_KEY = 'budgetapp_mobile_dropbox_link';
@@ -640,18 +640,43 @@
   // (некуда - страница статическая), сам факт успешного get() без
   // исключения означает "биометрия совпала" - этого достаточно для
   // локального замка, настоящая проверка подписи тут не нужна.
+  // Текущий запрос биометрии. Пока он не завершён, второй
+  // navigator.credentials.get на Android сразу падает ("A request is
+  // already pending"), так и не показав окна. Если автоматический запрос
+  // при открытии молча не показал окно (так бывает на части прошивок),
+  // нажатие на кнопку падало мгновенно - поэтому новый запрос сначала
+  // отменяет висящий и дожидается его завершения.
+  let biometricRequest = null;
+
+  async function cancelBiometricRequest() {
+    if (!biometricRequest) return;
+    const pending = biometricRequest;
+    biometricRequest = null;
+    pending.controller.abort();
+    // Не дольше секунды - на случай, если браузер так и не завершит отменённый запрос.
+    await Promise.race([pending.done.catch(() => {}), new Promise(r => setTimeout(r, 1000))]);
+  }
+
+  // -> {ok: true} или {ok: false, error: 'NotAllowedError: ...'}
   async function tryBiometricUnlock() {
     const idB64 = localStorage.getItem(BIOMETRIC_KEY);
-    if (!idB64 || !window.PublicKeyCredential) return false;
+    if (!idB64 || !window.PublicKeyCredential) return { ok: false, error: 'биометрия не настроена' };
+    await cancelBiometricRequest();
+    const controller = new AbortController();
     try {
       const rawId = Uint8Array.from(atob(idB64), c => c.charCodeAt(0));
       const challenge = crypto.getRandomValues(new Uint8Array(32));
-      await navigator.credentials.get({
-        publicKey: { challenge, allowCredentials: [{ id: rawId, type: 'public-key' }], userVerification: 'required', timeout: 60000 }
+      const done = navigator.credentials.get({
+        publicKey: { challenge, allowCredentials: [{ id: rawId, type: 'public-key' }], userVerification: 'required', timeout: 60000 },
+        signal: controller.signal,
       });
-      return true;
+      biometricRequest = { controller, done };
+      await done;
+      return { ok: true };
     } catch (e) {
-      return false;
+      return { ok: false, error: e && e.name ? e.name + (e.message ? ': ' + e.message : '') : String(e) };
+    } finally {
+      if (biometricRequest && biometricRequest.controller === controller) biometricRequest = null;
     }
   }
 
@@ -683,8 +708,10 @@
     const biometricReady = !!(localStorage.getItem(BIOMETRIC_KEY) && window.PublicKeyCredential);
     document.getElementById('biometricUnlockBtn').style.display = biometricReady ? 'block' : 'none';
     setTimeout(() => document.getElementById('pinInput').focus(), 50);
-    if (biometricReady) {
-      tryBiometricUnlock().then(ok => { if (ok) unlockAndProceed(); });
+    // Автозапуск - только если запрос уже не идёт: visibilitychange вызывает
+    // showLockScreen повторно, например когда закрывается системное окно.
+    if (biometricReady && !biometricRequest) {
+      tryBiometricUnlock().then(r => { if (r.ok) unlockAndProceed(); });
     }
   }
 
@@ -707,11 +734,12 @@
   async function handleBiometricUnlockTap() {
     const errorEl = document.getElementById('pinError');
     errorEl.textContent = '';
-    const ok = await tryBiometricUnlock();
-    if (ok) {
+    const result = await tryBiometricUnlock(); // висящий автоматический запрос отменяется внутри
+    if (result.ok) {
       unlockAndProceed();
     } else {
-      errorEl.textContent = 'Не удалось подтвердить - попробуй PIN.';
+      // Причина - прямо на экране: иначе на телефоне её не узнать.
+      errorEl.textContent = 'Не удалось подтвердить (' + result.error + ') - попробуй PIN.';
     }
   }
 
@@ -888,7 +916,9 @@
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (swReloaded) return; // защита от двойного reload, если событие вдруг придёт больше одного раза
       swReloaded = true;
-      location.reload();
+      // Перезагрузка посреди запроса биометрии могла оставить системный
+      // сервис с незакрытым запросом - сначала отменяем его явно.
+      cancelBiometricRequest().finally(() => location.reload());
     });
     navigator.serviceWorker.register('sw.js').then((reg) => {
       swRegistration = reg;
