@@ -65,19 +65,24 @@
     --text: #eef1f5;
     --text-muted: #9fb0c3;
     --accent: #6fd3a0;
-    --danger: #e08787;
+    --accent-text: #10131a;
+    --danger: #e38d8d;  /* #e08787 давал 4.44:1 на подкрашенной строке категории */
     --warning: #e0ad5c;
     --warning-badge-bg: #4d3f22;
     --card-bg: #2a3242;
     --border: #3d4658;
   }
+  /* Цвета светлой темы - те же, что в десктопном style.css, подобраны под
+     WCAG AA 4.5:1: прежний зелёный #1f9d63 давал 3.46:1 на белом. Текст
+     на зелёных кнопках - белый (тёмный на новом зелёном дал бы 3.46:1). */
   [data-theme="light"] {
     --bg: #f2f4f8;
     --text: #1c2333;
     --text-muted: #5b6b82;
-    --accent: #1f9d63;
-    --danger: #c9403f;
-    --warning: #a3701c;
+    --accent: #157a4c;
+    --accent-text: #ffffff;
+    --danger: #b8373a;
+    --warning: #8a5e14;
     --warning-badge-bg: #f6e8c9;
     --card-bg: #ffffff;
     --border: #d7dee8;
@@ -139,7 +144,7 @@
      на поле. Раньше это гасил maximum-scale=1 в viewport, но он же не давал
      увеличить страницу пальцами. */
   input { width: 100%; margin-bottom: 8px; font-size: 16px; }
-  button { background: var(--accent); color: #10131a; border: none; font-weight: 600; }
+  button { background: var(--accent); color: var(--accent-text); border: none; font-weight: 600; }
   .tabs {
     position: fixed; bottom: 0; left: 0; right: 0;
     display: flex; background: var(--card-bg); border-top: 1px solid var(--border);
@@ -155,7 +160,7 @@
   .depth-1 { padding-left: 16px; color: var(--text-muted); }
   .depth-0 { font-weight: 600; }
   #budgetTable tr.category-row { background: rgba(31, 157, 99, 0.08); }
-  [data-theme="light"] #budgetTable tr.category-row { background: rgba(31, 157, 99, 0.12); }
+  [data-theme="light"] #budgetTable tr.category-row { background: rgba(21, 122, 76, 0.1); }
 
   /* Сигнал о перерасходе - тот же третий смысловой цвет (--warning),
      что и в десктопном приложении, отдельно от --danger (тот - уже
@@ -201,7 +206,9 @@
     display: flex; align-items: center; justify-content: space-between;
     margin: 10px 0; font-size: 14px;
   }
-  .link-action { text-decoration: underline; cursor: pointer; }
+  /* Отступ - зона нажатия пальцем: у текста-ссылки было 16px в высоту. */
+  .link-action { text-decoration: underline; cursor: pointer; display: inline-block; padding: 12px 8px; }
+  .updated.stale { color: var(--warning); }
   /* Число вручную синхронизировано с CACHE_NAME в sw.js (поднимать
      оба при каждой правке index.html/sw.js) - позволяет на глаз
      отличить "правда обновилось" от "ещё старый закэшированный
@@ -307,7 +314,7 @@
   // Номер версии - ОДИН раз здесь (и в CACHE_NAME в sw.js), все метки на
   // экранах заполняются из него: раньше он был вписан в три заголовка
   // вручную, и на экране PIN так и остался v16, когда остальные уже были v18.
-  const APP_VERSION = 'v24';
+  const APP_VERSION = 'v25';
   document.querySelectorAll('.version-tag').forEach((el) => { el.textContent = APP_VERSION; });
 
   const STORAGE_KEY = 'budgetapp_mobile_dropbox_link';
@@ -366,6 +373,16 @@
   }
 
   // "YYYY-MM-DDTHH:MM" (Python isoformat) -> "ДД.ММ.ГГГГ, ЧЧ:ММ".
+  const STALE_SNAPSHOT_HOURS = 24;
+
+  // "YYYY-MM-DDTHH:MM" (местное время компьютера) -> сколько часов назад, или null.
+  function snapshotAgeHours(iso, now) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(iso || '');
+    if (!m) return null;
+    var t = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+    return ((now || new Date()) - t) / 3600000;
+  }
+
   function formatGeneratedAt(iso) {
     var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})/.exec(iso || '');
     return m ? (m[3] + '.' + m[2] + '.' + m[1] + ', ' + m[4]) : (iso || '');
@@ -484,8 +501,15 @@
     // выделяем саму метку жирным - это ключевая информация (насколько
     // свежи данные), не должна теряться на фоне подписи.
     var generatedDisplay = formatGeneratedAt(data.generated_at);
-    document.getElementById('updatedLine').innerHTML =
+    // Снимок старше суток - компьютер давно не синхронизировал (выключен,
+    // не запускался Планировщик) - выделяем, а не показываем как обычно.
+    var ageHours = snapshotAgeHours(data.generated_at);
+    var stale = ageHours !== null && ageHours >= STALE_SNAPSHOT_HOURS;
+    var updatedLine = document.getElementById('updatedLine');
+    updatedLine.className = 'updated' + (stale ? ' stale' : '');
+    updatedLine.innerHTML =
       'Обновлено на компьютере: <b>' + escapeHtml(generatedDisplay) + '</b>' +
+      (stale ? ' — данные старше суток' : '') +
       (navigator.onLine ? '' : ' (офлайн - показаны последние загруженные данные)');
 
     // warnings - список {source, warning} - появляется, если какой-то
