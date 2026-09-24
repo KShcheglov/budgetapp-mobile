@@ -193,6 +193,15 @@
   .avail-pill.warn { background: var(--warning-badge-bg); color: var(--warning); font-weight: 600; }
   .avail-pill.bad { background: var(--danger-badge-bg); color: var(--pill-bad-text); font-weight: 600; }
   #budgetTable tr.pace-row { cursor: pointer; }
+  /* Название статьи с сигналом о темпе - настоящая кнопка: до неё
+     доходят с клавиатуры и экранным диктором (aria-expanded), своего
+     обработчика у неё нет - нажатие всплывает до onclick строки. */
+  .pace-toggle {
+    display: inline; padding: 0; margin: 0; border-radius: 0;
+    background: none; color: inherit; font: inherit; text-align: left;
+  }
+  .pace-caret { display: inline-block; margin-left: 4px; color: var(--warning); transition: transform 0.15s; }
+  .pace-toggle[aria-expanded="true"] .pace-caret { transform: rotate(90deg); }
   #budgetTable tr.pace-detail-row td {
     background: rgba(224, 173, 92, 0.08); border-bottom: 1px solid var(--border);
   }
@@ -339,7 +348,7 @@
   // Номер версии - ОДИН раз здесь (и в CACHE_NAME в sw.js), все метки на
   // экранах заполняются из него: раньше он был вписан в три заголовка
   // вручную, и на экране PIN так и остался v16, когда остальные уже были v18.
-  const APP_VERSION = 'v27';
+  const APP_VERSION = 'v28';
   document.querySelectorAll('.version-tag').forEach((el) => { el.textContent = APP_VERSION; });
 
   const STORAGE_KEY = 'budgetapp_mobile_dropbox_link';
@@ -395,6 +404,14 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+
+  // "2026-09" -> "Сентябрь 2026" (как в шапке бюджета на компьютере).
+  const MONTH_NAMES = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+  function monthTitle(month) {
+    const m = /^(\d{4})-(\d{2})$/.exec(String(month || ''));
+    if (!m || !MONTH_NAMES[Number(m[2]) - 1]) return String(month || '');
+    return MONTH_NAMES[Number(m[2]) - 1] + ' ' + m[1];
   }
 
   // "YYYY-MM-DDTHH:MM" (Python isoformat) -> "ДД.ММ.ГГГГ, ЧЧ:ММ".
@@ -708,7 +725,7 @@
 
   function renderBudget(data) {
     const sym = escapeHtml(data.display_currency_code || '');
-    document.getElementById('budgetMonthLabel').textContent = 'Бюджет: ' + data.budget.month;
+    document.getElementById('budgetMonthLabel').textContent = 'Бюджет: ' + monthTitle(data.budget.month);
     renderPaceWarnings(data.budget.overspend_warnings || []);
 
     let html = '<thead><tr><th>Категория</th><th class="num">План</th><th class="num">Факт</th><th class="num">Остаток</th></tr></thead><tbody>';
@@ -721,7 +738,11 @@
       // видимость дважды за один тап, отменяя сам себя.
       const detailId = 'paceDetail' + idx;
       const tapAttr = pace ? ' class="' + rowClass.trim() + ' pace-row" onclick="togglePaceDetail(\'' + detailId + '\')"' : ' class="' + rowClass.trim() + '"';
-      html += '<tr' + tapAttr + '><td class="' + nameClass + '">' + escapeHtml(r.name) + '</td>' +
+      const nameHtml = pace
+        ? '<button type="button" class="pace-toggle" aria-expanded="false" aria-controls="' + detailId + '">' +
+          escapeHtml(r.name) + '<span class="pace-caret" aria-hidden="true">▸</span></button>'
+        : escapeHtml(r.name);
+      html += '<tr' + tapAttr + '><td class="' + nameClass + '">' + nameHtml + '</td>' +
         '<td class="num">' + formatMoney(r.assigned) + '</td>' +
         '<td class="num">' + formatMoney(r.activity) + '</td>' +
         '<td class="num"><span class="avail-pill ' + availabilityClass(r.available, pace) + '">' + formatMoney(r.available) + '</span></td></tr>';
@@ -768,12 +789,12 @@
 
   function renderPaceDetailHtml(pace) {
     if (pace.kind === 'weekly') {
-      return 'По ' + WEEKDAY_DATIVE_PLURAL[pace.weekday] + ' обычно: ≈ ' + formatMoney(pace.typical_amount_kopecks) + '<br>' +
-        'Ещё повторится до конца месяца: ' + pace.remaining_occurrences + ' раз(а)<br>' +
+      return 'По ' + escapeHtml(WEEKDAY_DATIVE_PLURAL[pace.weekday] || '') + ' обычно: ≈ ' + formatMoney(pace.typical_amount_kopecks) + '<br>' +
+        'Ещё повторится до конца месяца: ' + escapeHtml(pace.remaining_occurrences) + ' раз(а)<br>' +
         'Ожидаемый перерасход к концу месяца: ' + formatMoney(pace.projected_shortfall_kopecks);
     }
-    return 'Последние ' + pace.window_days + ' дней: ≈ ' + formatMoney(pace.daily_rate_kopecks) + ' /день<br>' +
-      'При этом темпе: уйдёт в минус ~' + pace.crossing_day + ' числа<br>' +
+    return 'Последние ' + escapeHtml(pace.window_days) + ' дней: ≈ ' + formatMoney(pace.daily_rate_kopecks) + ' /день<br>' +
+      'При этом темпе: уйдёт в минус ~' + escapeHtml(pace.crossing_day) + ' числа<br>' +
       'Ожидаемый перерасход к концу месяца: ' + formatMoney(pace.projected_shortfall_kopecks);
   }
 
@@ -788,7 +809,7 @@
       return;
     }
     const chips = warnings.map(w => {
-      const detail = w.kind === 'weekly' ? 'по ' + WEEKDAY_DATIVE_PLURAL[w.weekday] : 'к ' + w.crossing_day + ' числу';
+      const detail = w.kind === 'weekly' ? 'по ' + escapeHtml(WEEKDAY_DATIVE_PLURAL[w.weekday] || '') : 'к ' + escapeHtml(w.crossing_day) + ' числу';
       return '<span class="pace-chip">' + escapeHtml(w.name) + ' — ' + detail + '</span>';
     }).join('');
     box.innerHTML = '<div class="pace-banner-text">На повышенном темпе трат — возможен перерасход:</div>' + chips;
@@ -801,7 +822,11 @@
   // надёжнее раскрывать строку таблицы, чем позиционировать поповер.
   function togglePaceDetail(id) {
     const el = document.getElementById(id);
-    if (el) el.style.display = el.style.display === 'none' ? 'table-row' : 'none';
+    if (!el) return;
+    const open = el.style.display === 'none';
+    el.style.display = open ? 'table-row' : 'none';
+    const button = document.querySelector('[aria-controls="' + id + '"]');
+    if (button) button.setAttribute('aria-expanded', String(open));
   }
 
   // ===================== Защита входа (PIN + биометрия) =====================
@@ -897,11 +922,15 @@
     }
   }
 
-  function showLockScreen() {
+  function hideAppContent() {
     document.getElementById('setupScreen').style.display = 'none';
     document.getElementById('mainScreen').style.display = 'none';
     document.getElementById('tabs').style.display = 'none';
     document.getElementById('lockScreen').style.display = 'block';
+  }
+
+  function showLockScreen() {
+    hideAppContent();
     document.getElementById('pinInput').value = '';
     document.getElementById('pinError').textContent = '';
     // Надёжность автозапуска WebAuthn без тапа РАЗНАЯ на разных
@@ -1164,6 +1193,11 @@
     if (!isLockEnabled()) return;
     if (document.visibilityState === 'hidden') {
       appUnlocked = false;
+      // Данные прячем сразу, а не при возврате: иначе их видно на
+      // миниатюре в списке недавних приложений и первые мгновения после
+      // возврата, пока не отрисовался замок (внешнее ревью 24.09.2026).
+      // Сам замок с автозапросом отпечатка - при возврате, ниже.
+      hideAppContent();
     } else if (document.visibilityState === 'visible' && !appUnlocked) {
       showLockScreen();
     }
