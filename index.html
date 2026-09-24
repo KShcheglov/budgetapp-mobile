@@ -69,6 +69,8 @@
     --danger: #e38d8d;  /* #e08787 давал 4.44:1 на подкрашенной строке категории */
     --warning: #e0ad5c;
     --warning-badge-bg: #4d3f22;
+    --danger-badge-bg: #4a2d2d;
+    --pill-bad-text: #e38d8d;
     --card-bg: #2a3242;
     --border: #3d4658;
   }
@@ -84,6 +86,8 @@
     --danger: #b8373a;
     --warning: #8a5e14;
     --warning-badge-bg: #f6e8c9;
+    --danger-badge-bg: #fbdcdb;
+    --pill-bad-text: #a52d31;  /* --danger на этой плашке давал 4.49:1 - на волос ниже AA */
     --card-bg: #ffffff;
     --border: #d7dee8;
   }
@@ -178,10 +182,16 @@
     border-radius: 999px; padding: 2px 8px; font-size: 11.5px; font-weight: 600;
     margin: 2px 4px 0 0;
   }
-  .pace-dot {
-    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
-    background: var(--warning); margin-left: 5px; vertical-align: middle;
+  /* "Остаток" - как "Доступно" на компьютере: в норме обычным текстом,
+     плашкой только то, на что надо посмотреть - минус (красная) и темп
+     трат, грозящий минусом до конца месяца (оранжевая); ноль - серым. */
+  .avail-pill {
+    display: inline-block; padding: 1px 6px; border-radius: 999px;
+    white-space: nowrap; font-variant-numeric: tabular-nums;
   }
+  .avail-pill.zero { color: var(--text-muted); }
+  .avail-pill.warn { background: var(--warning-badge-bg); color: var(--warning); font-weight: 600; }
+  .avail-pill.bad { background: var(--danger-badge-bg); color: var(--pill-bad-text); font-weight: 600; }
   #budgetTable tr.pace-row { cursor: pointer; }
   #budgetTable tr.pace-detail-row td {
     background: rgba(224, 173, 92, 0.08); border-bottom: 1px solid var(--border);
@@ -288,7 +298,7 @@
       <div class="card">
         <h2 style="margin-top:0; font-size:15px" id="budgetMonthLabel">Бюджет</h2>
         <div class="budget-summary" id="budgetSummary"></div>
-        <div id="paceWarningBanner" style="display:none"></div>
+        <div id="paceWarningBanner" class="pace-banner" style="display:none"></div>
         <div class="table-wrapper">
           <table id="budgetTable"></table>
         </div>
@@ -314,7 +324,7 @@
   // Номер версии - ОДИН раз здесь (и в CACHE_NAME в sw.js), все метки на
   // экранах заполняются из него: раньше он был вписан в три заголовка
   // вручную, и на экране PIN так и остался v16, когда остальные уже были v18.
-  const APP_VERSION = 'v25';
+  const APP_VERSION = 'v26';
   document.querySelectorAll('.version-tag').forEach((el) => { el.textContent = APP_VERSION; });
 
   const STORAGE_KEY = 'budgetapp_mobile_dropbox_link';
@@ -565,7 +575,6 @@
 
     let html = '<thead><tr><th>Категория</th><th class="num">План</th><th class="num">Факт</th><th class="num">Остаток</th></tr></thead><tbody>';
     data.budget.rows.forEach((r, idx) => {
-      const cls = r.available >= 0 ? 'positive' : 'negative';
       const nameClass = r.depth > 0 ? 'depth-1' : 'depth-0';
       const rowClass = r.depth === 0 ? ' category-row' : '';
       const pace = r.pace;
@@ -574,11 +583,10 @@
       // видимость дважды за один тап, отменяя сам себя.
       const detailId = 'paceDetail' + idx;
       const tapAttr = pace ? ' class="' + rowClass.trim() + ' pace-row" onclick="togglePaceDetail(\'' + detailId + '\')"' : ' class="' + rowClass.trim() + '"';
-      const paceDot = pace ? '<span class="pace-dot"></span>' : '';
       html += '<tr' + tapAttr + '><td class="' + nameClass + '">' + escapeHtml(r.name) + '</td>' +
         '<td class="num">' + formatMoney(r.assigned) + '</td>' +
         '<td class="num">' + formatMoney(r.activity) + '</td>' +
-        '<td class="num ' + cls + '">' + formatMoney(r.available) + paceDot + '</td></tr>';
+        '<td class="num"><span class="avail-pill ' + availabilityClass(r.available, pace) + '">' + formatMoney(r.available) + '</span></td></tr>';
       if (pace) {
         html += '<tr class="pace-detail-row" id="' + detailId + '" style="display:none"><td colspan="4"><div class="pace-detail">' +
           renderPaceDetailHtml(pace) +
@@ -602,6 +610,14 @@
       '<td class="num ' + totalCls + '">' + formatMoney(t.available) + '</td></tr>';
     html += '</tbody>';
     document.getElementById('budgetTable').innerHTML = html;
+  }
+
+  // Тот же выбор, что у "Доступно" на компьютере (frontend/js/budget.js).
+  function availabilityClass(available, pace) {
+    if (available < 0) return 'bad';
+    if (pace) return 'warn';
+    if (available === 0) return 'zero';
+    return 'ok';
   }
 
   // Два независимых механизма сигнала о перерасходе (см.
