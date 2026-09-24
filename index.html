@@ -219,6 +219,9 @@
   /* Отступ - зона нажатия пальцем: у текста-ссылки было 16px в высоту. */
   .link-action { text-decoration: underline; cursor: pointer; display: inline-block; padding: 12px 8px; }
   .updated.stale { color: var(--warning); }
+  /* Сканер QR со ссылкой (экран настройки ссылки). */
+  .qr-scan video { display: block; width: 100%; max-width: 360px; margin: 10px 0 6px; border-radius: 10px; background: #000; }
+  .qr-note { color: var(--accent); font-size: 13px; margin: 0 0 8px; }
   /* Число вручную синхронизировано с CACHE_NAME в sw.js (поднимать
      оба при каждой правке index.html/sw.js) - позволяет на глаз
      отличить "правда обновилось" от "ещё старый закэшированный
@@ -268,8 +271,20 @@
       создай новую и вставь сюда.
     </p>
     <input type="text" id="linkInput" placeholder="https://www.dropbox.com/scl/fi/.../budgetapp_mobile_snapshot.json?...">
+    <p class="qr-note" id="qrLinkNote" style="display:none">Ссылка подставлена из QR-кода — проверь, что это твой снимок, и нажми «Сохранить и загрузить».</p>
     <button onclick="saveLink()">Сохранить и загрузить</button>
+    <button id="qrScanBtn" onclick="startQrScan()" style="margin-top:8px; display:none; background:var(--card-bg); color:var(--text)">📷 Сканировать QR</button>
     <button onclick="pasteFromClipboard()" style="margin-top:8px; background:var(--card-bg); color:var(--text)">📋 Вставить из буфера</button>
+    <div id="qrScanBox" class="qr-scan" style="display:none">
+      <video id="qrVideo" playsinline muted></video>
+      <div class="muted" id="qrScanStatus"></div>
+      <button onclick="stopQrScan()" style="margin-top:8px; background:var(--card-bg); color:var(--text)">Отмена</button>
+    </div>
+    <p class="muted">
+      Можно не вводить ссылку: в десктопном приложении «Резервные копии» →
+      «QR для телефона», и отсканируй QR обычной камерой телефона — ссылка
+      подставится сама.
+    </p>
   </div>
 
   <div id="mainScreen" style="display:none">
@@ -324,7 +339,7 @@
   // Номер версии - ОДИН раз здесь (и в CACHE_NAME в sw.js), все метки на
   // экранах заполняются из него: раньше он был вписан в три заголовка
   // вручную, и на экране PIN так и остался v16, когда остальные уже были v18.
-  const APP_VERSION = 'v26';
+  const APP_VERSION = 'v27';
   document.querySelectorAll('.version-tag').forEach((el) => { el.textContent = APP_VERSION; });
 
   const STORAGE_KEY = 'budgetapp_mobile_dropbox_link';
@@ -424,11 +439,122 @@
     return url + (url.includes('?') ? '&' : '?') + 'dl=1';
   }
 
-  function showSetup() {
+  function showSetup(linkFromQr) {
     document.getElementById('setupScreen').style.display = 'block';
     document.getElementById('mainScreen').style.display = 'none';
     document.getElementById('tabs').style.display = 'none';
-    document.getElementById('linkInput').value = localStorage.getItem(STORAGE_KEY) || '';
+    document.getElementById('linkInput').value = linkFromQr || localStorage.getItem(STORAGE_KEY) || '';
+    document.getElementById('qrLinkNote').style.display = linkFromQr ? 'block' : 'none';
+    document.getElementById('qrScanBtn').style.display = qrScanSupported() ? 'block' : 'none';
+  }
+
+  // ---- QR со ссылкой (десктоп: "Резервные копии" → "QR для телефона",
+  // backend/phone_qr.py). В QR - адрес этой страницы и ссылка после
+  // "#dropbox=", либо просто сама ссылка.
+  const QR_PARAM = 'dropbox';
+
+  function isDropboxLink(s) {
+    return /^https:\/\/(www\.dropbox\.com|dl\.dropboxusercontent\.com)\/\S+$/.test(s || '');
+  }
+
+  function linkFromQrText(text) {
+    text = String(text || '').trim();
+    const marker = '#' + QR_PARAM + '=';
+    const at = text.indexOf(marker);
+    if (at >= 0) {
+      try { text = decodeURIComponent(text.slice(at + marker.length)).trim(); } catch (e) { return null; }
+    }
+    return isDropboxLink(text) ? text : null;
+  }
+
+  // Страницу открыли обычной камерой по QR - ссылка пришла в "#". Сразу
+  // убираем её из адресной строки (часть после "#" на сервер и так не
+  // уходит); сохраняется она, только когда пользователь сам нажмёт
+  // "Сохранить", и после PIN, если он включён (см. proceedToApp).
+  let pendingQrLink = null;
+  function takeQrLinkFromAddress() {
+    if (location.hash.indexOf('#' + QR_PARAM + '=') !== 0) return false;
+    pendingQrLink = linkFromQrText(location.hash);
+    history.replaceState(null, '', location.pathname + location.search);
+    return true;
+  }
+  takeQrLinkFromAddress();
+  // Страница уже была открыта в этой вкладке - браузер не перезагружает её,
+  // а только меняет часть после "#". Дальше - как при запуске: PIN, если
+  // включён, потом экран настройки со ссылкой.
+  window.addEventListener('hashchange', () => { if (takeQrLinkFromAddress()) bootApp(); });
+
+  // Сканер прямо в странице: BarcodeDetector есть в Chrome на Android,
+  // в Safari на iPhone - нет (там остаётся обычная камера телефона).
+  let qrScan = null;  // { stream, timer } идущего сканирования
+
+  function qrScanSupported() {
+    return 'BarcodeDetector' in window && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  }
+
+  async function startQrScan() {
+    const box = document.getElementById('qrScanBox');
+    const status = document.getElementById('qrScanStatus');
+    const video = document.getElementById('qrVideo');
+    stopQrScan();
+    box.style.display = 'block';
+    let detector;
+    try {
+      const formats = await BarcodeDetector.getSupportedFormats();
+      if (formats.indexOf('qr_code') < 0) throw new Error('этот браузер не читает QR');
+      detector = new BarcodeDetector({ formats: ['qr_code'] });
+    } catch (e) {
+      video.style.display = 'none';
+      status.textContent = 'Сканер недоступен (' + (e.message || e) + ') - отсканируй QR обычной камерой телефона.';
+      return;
+    }
+    status.textContent = 'Наведи камеру на QR на экране компьютера…';
+    video.style.display = 'block';
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      qrScan = { stream, timer: null };
+      video.srcObject = stream;
+      await video.play();
+    } catch (e) {
+      stopQrScan();
+      box.style.display = 'block';
+      video.style.display = 'none';
+      status.textContent = e && e.name === 'NotAllowedError'
+        ? 'Нет разрешения на камеру - разреши его в настройках сайта или отсканируй QR обычной камерой телефона.'
+        : 'Камера недоступна: ' + ((e && e.message) || e);
+      return;
+    }
+    const tick = async () => {
+      if (!qrScan) return;
+      try {
+        const codes = await detector.detect(video);
+        for (const code of codes) {
+          const link = linkFromQrText(code.rawValue);
+          if (link) {
+            stopQrScan();
+            showSetup(link);
+            return;
+          }
+          status.textContent = 'Это не тот QR - нужен QR со страницы «Резервные копии» → «QR для телефона».';
+        }
+      } catch (e) { /* кадр не распознан - пробуем следующий */ }
+      if (qrScan) qrScan.timer = setTimeout(tick, 250);
+    };
+    tick();
+  }
+
+  // Камеру отпускаем сразу: по нажатию "Отмена", после чтения QR, при
+  // сохранении ссылки и при уходе со страницы.
+  function stopQrScan() {
+    if (qrScan) {
+      clearTimeout(qrScan.timer);
+      qrScan.stream.getTracks().forEach(t => t.stop());
+      qrScan = null;
+    }
+    const video = document.getElementById('qrVideo');
+    video.pause();
+    video.srcObject = null;
+    document.getElementById('qrScanBox').style.display = 'none';
   }
 
   async function pasteFromClipboard() {
@@ -443,6 +569,8 @@
   function saveLink() {
     const link = document.getElementById('linkInput').value.trim();
     if (!link) return;
+    stopQrScan();
+    document.getElementById('qrLinkNote').style.display = 'none';
     // Снимок по прежней ссылке не должен оставаться в памяти телефона (см. sw.js).
     const changed = link !== localStorage.getItem(STORAGE_KEY);
     const cleared = changed && window.caches ? caches.delete(SNAPSHOT_CACHE).catch(() => {}) : Promise.resolve();
@@ -454,6 +582,14 @@
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById('page-' + name).classList.add('active');
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.page === name));
+  }
+
+  // Пока снимок загружался, экран успели заблокировать (свернули
+  // приложение и вернулись - см. visibilitychange): тогда ничего не
+  // показываем, иначе страница с данными появлялась под экраном PIN.
+  // После входа proceedToApp загрузит снимок заново.
+  function lockedDuringLoad() {
+    return isLockEnabled() && !appUnlocked;
   }
 
   async function loadSnapshot() {
@@ -485,6 +621,7 @@
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       data = await resp.json();
     } catch (e) {
+      if (lockedDuringLoad()) return;
       errorBox.innerHTML = '<p style="color:var(--danger)">Не удалось загрузить: ' + escapeHtml(e.message) +
         '. Проверь ссылку (кнопка "поменять ссылку" внизу) и что телефон в сети. ' +
         'Для bit.ly используй полную Dropbox-ссылку.</p>';
@@ -494,6 +631,7 @@
       return;
     }
 
+    if (lockedDuringLoad()) return;
     if (!data.ok) {
       errorBox.innerHTML = '<p style="color:var(--danger)">Снимок с ошибкой: ' + escapeHtml(data.error || '?') + '</p>';
       return;
@@ -741,6 +879,15 @@
   }
 
   function proceedToApp() {
+    // Пришла ссылка из QR (обычной камерой) - показать её на экране
+    // настройки; сохранит пользователь сам. Та же, что уже сохранена, -
+    // просто открыть приложение.
+    const qrLink = pendingQrLink;
+    pendingQrLink = null;
+    if (qrLink && qrLink !== localStorage.getItem(STORAGE_KEY)) {
+      showSetup(qrLink);
+      return;
+    }
     if (localStorage.getItem(STORAGE_KEY)) {
       document.getElementById('mainScreen').style.display = 'block';
       document.getElementById('tabs').style.display = 'flex';
@@ -1013,6 +1160,7 @@
   // "редактирование" контента в списке недавних приложений (это умеют
   // только нативные приложения), а быстрый повторный показ замка.
   document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') stopQrScan();
     if (!isLockEnabled()) return;
     if (document.visibilityState === 'hidden') {
       appUnlocked = false;
